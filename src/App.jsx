@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Plus, Check, X, ChevronLeft, ChevronRight, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy } from 'lucide-react';
-import { encodeCamisetaToPng, generateCamisetaSVG } from './codec/index.js';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Plus, Check, X, ChevronLeft, ChevronRight, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle } from 'lucide-react';
+import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta } from './codec/index.js';
 
 const STATE_KEY = 'juego-camisetas:state:v1';
 const DAY = 86400000;
@@ -220,6 +220,7 @@ export default function App() {
   const [showCreate, setShowCreate] = useState(false);
   const [showCatalogo, setShowCatalogo] = useState(false);
   const [previewCat, setPreviewCat] = useState(null);
+  const [showImport, setShowImport] = useState(false);
   const [sesion, setSesion] = useState(null);
 
   useEffect(() => { loadState().then(setState); }, []);
@@ -239,6 +240,57 @@ export default function App() {
     s.camisetas.push({ id, ...data, creador_id: s.user_id, origen: 'propia', origen_camiseta_id: null, precio: null, created_at: nowISO(), archived_at: null, misiones: [], milestones: [] });
     pushEv(s, { tipo: 'camiseta_creada', cam_id: id, nombre: data.nombre, emoji: data.emoji });
   });
+  const recibirCamiseta = (molde) => {
+    // molde is the decoded camiseta object from decodeImageToCamiseta (mode='molde').
+    // Estado se transmite en cero: misiones empiezan activas sin completions,
+    // milestones pendientes. Preservamos creador_id original y atamos origen_camiseta_id
+    // al id del molde recibido para trazar la procedencia.
+    let newId = null;
+    update(s => {
+      const camId = uid();
+      newId = camId;
+      const creadorOriginal = molde.creador_id || 'desconocido';
+      s.camisetas.push({
+        id: camId,
+        nombre: molde.nombre,
+        emoji: molde.emoji || '👕',
+        esencia: molde.esencia || '',
+        arco: molde.arco,
+        creador_id: creadorOriginal,
+        origen: 'recibida',
+        origen_camiseta_id: molde.id || null,
+        precio: null,
+        created_at: nowISO(),
+        archived_at: null,
+        misiones: (molde.misiones || []).map(m => ({
+          id: uid(),
+          nombre: m.nombre,
+          forma: m.forma,
+          tonos: m.tonos || [],
+          puntos_base: m.puntos_base || 1,
+          estado: 'activa',
+          created_at: nowISO(),
+          completed_at: null,
+          archived_at: null,
+          completions: [],
+          autor_id: creadorOriginal,
+          asignada_por: creadorOriginal,
+        })),
+        milestones: (molde.milestones || []).map(ms => ({
+          id: uid(),
+          nombre: ms.nombre,
+          descripcion: ms.descripcion || '',
+          regalo: ms.regalo || '',
+          estado: 'pendiente',
+          created_at: nowISO(),
+          achieved_at: null,
+          regalo_cobrado_at: null,
+        })),
+      });
+      pushEv(s, { tipo: 'camiseta_recibida', cam_id: camId, nombre: molde.nombre, emoji: molde.emoji, creador: creadorOriginal });
+    });
+    return newId;
+  };
   const comprarCamiseta = (catalogoId) => {
     const cat = CATALOGO.find(c => c.id === catalogoId);
     if (!cat) return false;
@@ -394,8 +446,17 @@ export default function App() {
   const puntosUser = puntosTotales(state.movimientos);
 
   // Bienvenida: primera vez sin camisetas y sin haber decidido aún
-  if (state.camisetas.length === 0 && !showCreate && !showCatalogo) {
-    return <Frame><Welcome onCatalogo={() => setShowCatalogo(true)} onCrear={() => setShowCreate(true)} /></Frame>;
+  if (state.camisetas.length === 0 && !showCreate && !showCatalogo && !showImport) {
+    return <Frame><Welcome onCatalogo={() => setShowCatalogo(true)} onCrear={() => setShowCreate(true)} onImport={() => setShowImport(true)} /></Frame>;
+  }
+  if (showImport) {
+    return <Frame><ImportSheet
+      onClose={() => setShowImport(false)}
+      onImport={(molde) => {
+        const id = recibirCamiseta(molde);
+        setShowImport(false);
+        if (id) setOpenCam(id);
+      }} /></Frame>;
   }
   // Catálogo (lista de camisetas pre-establecidas)
   if (showCatalogo && !previewCat) {
@@ -456,7 +517,7 @@ export default function App() {
   return (<Frame><Header puntos={puntosUser} warn={state._saveError} />
     <main className="px-5 pb-32 pt-2 max-w-2xl mx-auto">
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onOpen={setOpenCam} />}
-      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} />}
+      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion} />}
     </main>
     <TabBar tab={tab} setTab={setTab} />
@@ -538,7 +599,7 @@ function TabBar({ tab, setTab }) {
   </nav>);
 }
 
-function Welcome({ onCatalogo, onCrear }) {
+function Welcome({ onCatalogo, onCrear, onImport }) {
   return (<div className="min-h-screen flex flex-col justify-center items-center px-8 max-w-xl mx-auto text-center">
     <div className="fade-up smallcaps mb-6" style={{ color: 'var(--ink-faint)' }}>El juego de las camisetas</div>
     <h1 className="fade-up-d1 display text-5xl md:text-6xl leading-[1.05] mb-4">
@@ -555,6 +616,9 @@ function Welcome({ onCatalogo, onCrear }) {
     </button>
     <button onClick={onCrear} className="fade-up-d3 ff-mono text-xs ring-ink py-2 px-3" style={{ color: 'var(--ink-faint)' }}>
       o construir la mía propia
+    </button>
+    <button onClick={onImport} className="fade-up-d3 ff-mono text-xs ring-ink py-2 px-3 mt-1 flex items-center gap-1.5" style={{ color: 'var(--ink-faint)' }}>
+      <Inbox size={12} /><span>o recibir una de alguien</span>
     </button>
     <div className="fade-up-d3 ff-mono text-xs mt-16" style={{ color: 'var(--ink-faint)' }}>v0.5 · prototipo</div>
   </div>);
@@ -882,7 +946,7 @@ function MisionRow({ m, onToggle }) {
   </button>);
 }
 
-function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo }) {
+function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, onImport }) {
   const activas = cams.filter(c => !c.archived_at);
   const archivadas = cams.filter(c => c.archived_at);
   return (<div className="fade-up">
@@ -892,7 +956,8 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo }) 
       </p>
       <div className="flex gap-1">
         <button onClick={onOpenCatalogo} className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>catálogo</button>
-        <button onClick={onCreate} className="ring-ink p-2" style={{ color: 'var(--ink-soft)' }}><Plus size={20} strokeWidth={1.5} /></button>
+        <button onClick={onImport} className="ring-ink p-2" style={{ color: 'var(--ink-soft)' }} aria-label="Recibir camiseta"><Inbox size={20} strokeWidth={1.5} /></button>
+        <button onClick={onCreate} className="ring-ink p-2" style={{ color: 'var(--ink-soft)' }} aria-label="Crear camiseta"><Plus size={20} strokeWidth={1.5} /></button>
       </div>
     </div>
     <div className="grid gap-3">
@@ -1237,6 +1302,142 @@ function ShareSheet({ cam, onClose }) {
       </div>
     </div>
   );
+}
+
+function ImportSheet({ onClose, onImport }) {
+  const [phase, setPhase] = useState('pick');  // pick | loading | preview | error
+  const [decoded, setDecoded] = useState(null);
+  const [error, setError] = useState(null);
+  const [previewSrc, setPreviewSrc] = useState(null);
+  const inputRef = useRef(null);
+
+  // Cleanup blob URL on unmount or change
+  useEffect(() => () => { if (previewSrc) URL.revokeObjectURL(previewSrc); }, [previewSrc]);
+
+  async function handleFile(file) {
+    if (!file) return;
+    setPhase('loading');
+    setError(null);
+    try {
+      const result = await decodeImageToCamiseta(file);
+      if (result.mode !== 'molde') {
+        throw new Error('Esta imagen contiene un backup personal, no una camiseta para compartir. Solo se pueden importar moldes (modo molde).');
+      }
+      // Generate a preview SVG from the decoded data — this should match the
+      // original sender's design closely (same seed: id + nombre).
+      try {
+        const raw = generateCamisetaSVG(result.camiseta);
+        const blob = new Blob([raw], { type: 'image/svg+xml' });
+        setPreviewSrc(URL.createObjectURL(blob));
+      } catch (_) { /* preview is best-effort */ }
+      setDecoded(result.camiseta);
+      setPhase('preview');
+    } catch (e) {
+      setError(e.message || 'No se pudo leer la imagen.');
+      setPhase('error');
+    }
+  }
+
+  function reset() {
+    if (previewSrc) URL.revokeObjectURL(previewSrc);
+    setPreviewSrc(null);
+    setDecoded(null);
+    setError(null);
+    setPhase('pick');
+    if (inputRef.current) inputRef.current.value = '';
+  }
+
+  return (<div className="min-h-screen px-5 pt-6 pb-20 max-w-2xl mx-auto fade-up">
+    <div className="flex items-center justify-between mb-6">
+      <button onClick={onClose} className="ring-ink ff-mono text-xs p-2 -ml-2" style={{ color: 'var(--ink-faint)' }}>← cerrar</button>
+      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Recibir camiseta</span>
+    </div>
+
+    {phase === 'pick' && (<>
+      <h1 className="display text-4xl mb-2">¿Te llegó una?</h1>
+      <p className="ff-serif italic text-base mb-8" style={{ color: 'var(--ink-soft)' }}>
+        Toda imagen de camiseta esconde su diseño dentro. Cárgala y la leemos.
+      </p>
+      <label className="block ring-ink cursor-pointer p-8 text-center"
+        style={{ border: '2px dashed var(--line)', background: 'var(--bg-card)' }}>
+        <input ref={inputRef} type="file" accept="image/*" className="hidden"
+          onChange={(e) => handleFile(e.target.files?.[0])} />
+        <Upload size={28} strokeWidth={1.5} className="mx-auto mb-3" style={{ color: 'var(--ink-soft)' }} />
+        <div className="ff-serif text-base mb-1" style={{ color: 'var(--ink)' }}>Elegir imagen</div>
+        <div className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>PNG o JPG desde tu galería</div>
+      </label>
+      <p className="ff-mono text-xs mt-6" style={{ color: 'var(--ink-faint)' }}>
+        Solo viaja el diseño. Las misiones empiezan en cero — el camino lo haces tú.
+      </p>
+    </>)}
+
+    {phase === 'loading' && (<div className="text-center py-16">
+      <div className="ff-serif italic text-base mb-2" style={{ color: 'var(--ink-soft)' }}>Leyendo la camiseta…</div>
+      <div className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>Decodificando el halftone</div>
+    </div>)}
+
+    {phase === 'preview' && decoded && (<>
+      <div className="smallcaps mb-2" style={{ color: 'var(--ink-faint)' }}>Encontramos esto</div>
+      <div className="flex items-baseline gap-3 mb-1">
+        <span className="text-4xl">{decoded.emoji || '👕'}</span>
+        <h1 className="display text-3xl">{decoded.nombre}</h1>
+      </div>
+      {decoded.creador_id && (
+        <p className="ff-mono text-xs mb-4" style={{ color: 'var(--ink-faint)' }}>creada por @{decoded.creador_id}</p>
+      )}
+      {decoded.esencia && (
+        <p className="ff-serif italic text-base mb-4" style={{ color: 'var(--ink-soft)' }}>{decoded.esencia}</p>
+      )}
+      {decoded.arco?.de && decoded.arco?.a && (
+        <p className="ff-mono text-xs mb-4" style={{ color: 'var(--ink-faint)' }}>
+          {decoded.arco.de} <span style={{ color: 'var(--gold)' }}>→</span> {decoded.arco.a}
+        </p>
+      )}
+      <div className="ff-mono text-xs mb-5 flex gap-3" style={{ color: 'var(--ink-faint)' }}>
+        <span>{decoded.misiones?.length || 0} misiones</span>
+        {(decoded.milestones?.length || 0) > 0 && <span>·</span>}
+        {(decoded.milestones?.length || 0) > 0 && <span>{decoded.milestones.length} hitos</span>}
+      </div>
+      {previewSrc && (
+        <div className="mb-5" style={{ border: '1px solid var(--line)', maxWidth: '280px', margin: '0 auto 1.25rem' }}>
+          <img src={previewSrc} alt={`Diseño de ${decoded.nombre}`} style={{ width: '100%', height: 'auto', display: 'block' }} />
+        </div>
+      )}
+      <div className="space-y-2 mb-3">
+        <button onClick={() => onImport(decoded)}
+          className="w-full ring-ink ff-serif text-base py-3 px-4"
+          style={{ background: 'var(--ink)', color: 'var(--bg)' }}>
+          Agregarla a mi colección
+        </button>
+        <button onClick={reset}
+          className="w-full ring-ink ff-mono text-xs py-2 px-4"
+          style={{ color: 'var(--ink-faint)' }}>
+          probar con otra imagen
+        </button>
+      </div>
+      <p className="ff-mono text-xs text-center mt-4" style={{ color: 'var(--ink-faint)' }}>
+        Empieza con las misiones activas y los hitos pendientes. Tu progreso es tuyo desde cero.
+      </p>
+    </>)}
+
+    {phase === 'error' && (<div className="py-8">
+      <div className="flex items-start gap-3 mb-4">
+        <AlertTriangle size={24} style={{ color: 'var(--accent)' }} className="flex-shrink-0 mt-1" />
+        <div>
+          <div className="ff-serif italic text-base mb-1" style={{ color: 'var(--ink)' }}>No pudimos leer esta imagen</div>
+          <div className="ff-mono text-xs" style={{ color: 'var(--ink-soft)' }}>{error}</div>
+        </div>
+      </div>
+      <p className="ff-mono text-xs mb-6" style={{ color: 'var(--ink-faint)' }}>
+        Suele pasar si: la imagen fue recortada, se le bajó la calidad demasiado, o no es una camiseta del juego. Probá con la original (no un screenshot).
+      </p>
+      <button onClick={reset}
+        className="w-full ring-ink ff-mono text-xs py-3 px-4"
+        style={{ border: '1px solid var(--line)', color: 'var(--ink)' }}>
+        elegir otra imagen
+      </button>
+    </div>)}
+  </div>);
 }
 
 function MisionRowDetail({ m, onToggle, onArchive, onEdit }) {
