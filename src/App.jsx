@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Plus, Check, X, ChevronLeft, ChevronRight, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Plus, Check, X, ChevronLeft, ChevronRight, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy } from 'lucide-react';
+import { encodeCamisetaToPng, generateCamisetaSVG } from './codec/index.js';
 
 const STATE_KEY = 'juego-camisetas:state:v1';
 const DAY = 86400000;
@@ -935,6 +936,7 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onAr
   const [editing, setEditing] = useState(null);
   const [editingCam, setEditingCam] = useState(false);
   const [confirmRetiro, setConfirmRetiro] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const activas = cam.misiones.filter(m => estadoDeMision(m) === 'activa');
   const hechas = cam.misiones.filter(m => m.estado === 'hecha' || estadoDeMision(m) === 'hecha-hoy');
   const archivadas = cam.misiones.filter(m => m.estado === 'archivada');
@@ -958,8 +960,14 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onAr
     </button>
     <div className="flex items-start justify-between mb-2">
       <div className="text-5xl">{cam.emoji}</div>
-      <button onClick={() => setEditingCam(true)} className="ring-ink ff-mono text-xs py-1 px-2 mt-3"
-        style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>editar</button>
+      <div className="flex gap-2 mt-3">
+        <button onClick={() => setSharing(true)} className="ring-ink ff-mono text-xs py-1 px-2 flex items-center gap-1.5"
+          style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }} aria-label="Compartir camiseta">
+          <Share2 size={12} /><span>compartir</span>
+        </button>
+        <button onClick={() => setEditingCam(true)} className="ring-ink ff-mono text-xs py-1 px-2"
+          style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>editar</button>
+      </div>
     </div>
     <h1 className="display text-4xl md:text-5xl mb-2">
       {cam.nombre}
@@ -1072,7 +1080,163 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onAr
         </div>
       )}
     </div>
+    {sharing && <ShareSheet cam={cam} onClose={() => setSharing(false)} />}
   </div>);
+}
+
+function ShareSheet({ cam, onClose }) {
+  const [busy, setBusy] = useState(null);     // 'share' | 'download' | 'copy' | null
+  const [msg, setMsg] = useState(null);       // { kind: 'ok'|'err', text }
+
+  // Preview as <img src=blob>. Loading SVG via <img> sandboxes any embedded
+  // <script> (no execution), so we don't need to trust strings the codec
+  // interpolates into the SVG. The PNG export uses the same SVG via canvas,
+  // so what you see is what you send.
+  const previewSrc = useMemo(() => {
+    try {
+      const raw = generateCamisetaSVG(cam);
+      const blob = new Blob([raw], { type: 'image/svg+xml' });
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      console.error('preview SVG failed:', e);
+      return null;
+    }
+  }, [cam]);
+
+  useEffect(() => () => { if (previewSrc) URL.revokeObjectURL(previewSrc); }, [previewSrc]);
+
+  const slug = (cam.nombre || 'camiseta').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  const filename = `${slug || 'camiseta'}.png`;
+
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  const canCopy = typeof navigator !== 'undefined' && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined';
+
+  useEffect(() => {
+    if (!msg) return;
+    const t = setTimeout(() => setMsg(null), 3000);
+    return () => clearTimeout(t);
+  }, [msg]);
+
+  // ESC to close
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  async function getBlob() {
+    return await encodeCamisetaToPng(cam, { mode: 'molde' });
+  }
+
+  async function doShare() {
+    setBusy('share');
+    try {
+      const blob = await getBlob();
+      const file = new File([blob], filename, { type: 'image/png' });
+      const data = { files: [file], title: cam.nombre, text: `«${cam.nombre}» — del juego de las camisetas` };
+      if (navigator.canShare && !navigator.canShare(data)) {
+        throw new Error('Este sistema no permite compartir archivos. Usá descargar.');
+      }
+      await navigator.share(data);
+      setMsg({ kind: 'ok', text: 'compartida' });
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        setMsg({ kind: 'err', text: e.message || 'no se pudo compartir' });
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function doDownload() {
+    setBusy('download');
+    try {
+      const blob = await getBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMsg({ kind: 'ok', text: 'descargada' });
+    } catch (e) {
+      setMsg({ kind: 'err', text: e.message || 'no se pudo descargar' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function doCopy() {
+    setBusy('copy');
+    try {
+      const blob = await getBlob();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      setMsg({ kind: 'ok', text: 'copiada al portapapeles' });
+    } catch (e) {
+      setMsg({ kind: 'err', text: e.message || 'no se pudo copiar' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 fade-up"
+      style={{ background: 'rgba(28, 24, 19, 0.55)' }}
+      onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md"
+        style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
+        <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '1px solid var(--line-soft)' }}>
+          <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Compartir el diseño</span>
+          <button onClick={onClose} className="ring-ink p-1" aria-label="Cerrar">
+            <X size={16} style={{ color: 'var(--ink-faint)' }} />
+          </button>
+        </div>
+        <div className="px-5 py-4">
+          <p className="ff-serif italic text-sm mb-4 leading-snug" style={{ color: 'var(--ink-soft)' }}>
+            Solo viaja el diseño. Tu progreso se queda contigo.
+          </p>
+          {previewSrc ? (
+            <div className="mb-5" style={{ border: '1px solid var(--line)', maxWidth: '320px', margin: '0 auto' }}>
+              <img src={previewSrc} alt={`Diseño de ${cam.nombre}`}
+                style={{ width: '100%', height: 'auto', display: 'block' }} />
+            </div>
+          ) : (
+            <p className="ff-mono text-xs mb-4" style={{ color: 'var(--accent)' }}>No se pudo generar la imagen.</p>
+          )}
+          <div className="space-y-2">
+            {canShare && (
+              <button onClick={doShare} disabled={!!busy}
+                className="w-full ring-ink ff-mono text-xs py-3 px-4 flex items-center justify-center gap-2"
+                style={{ background: 'var(--ink)', color: 'var(--bg)', opacity: busy ? 0.6 : 1 }}>
+                <Share2 size={14} />
+                <span>{busy === 'share' ? 'generando…' : 'compartir'}</span>
+              </button>
+            )}
+            <button onClick={doDownload} disabled={!!busy}
+              className="w-full ring-ink ff-mono text-xs py-3 px-4 flex items-center justify-center gap-2"
+              style={{ border: '1px solid var(--line)', color: 'var(--ink)', opacity: busy ? 0.6 : 1 }}>
+              <Download size={14} />
+              <span>{busy === 'download' ? 'generando…' : 'descargar PNG'}</span>
+            </button>
+            {canCopy && (
+              <button onClick={doCopy} disabled={!!busy}
+                className="w-full ring-ink ff-mono text-xs py-3 px-4 flex items-center justify-center gap-2"
+                style={{ border: '1px solid var(--line)', color: 'var(--ink)', opacity: busy ? 0.6 : 1 }}>
+                <Copy size={14} />
+                <span>{busy === 'copy' ? 'generando…' : 'copiar imagen'}</span>
+              </button>
+            )}
+          </div>
+          {msg && (
+            <p className="ff-mono text-xs mt-3 fade-up text-center"
+              style={{ color: msg.kind === 'err' ? 'var(--accent)' : 'var(--moss)' }}>
+              {msg.text}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function MisionRowDetail({ m, onToggle, onArchive, onEdit }) {
