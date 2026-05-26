@@ -209,6 +209,10 @@ function completionsEsteMes(m) {
   const l = Date.now() - 30 * DAY;
   return m.completions.filter(c => new Date(c).getTime() > l).length;
 }
+function completionsHoy(m) {
+  const today = new Date().toDateString();
+  return m.completions.filter(c => new Date(c).toDateString() === today).length;
+}
 
 // ----- helpers ledger -----
 function puntosDelDia(movimientos, fecha) {
@@ -387,21 +391,15 @@ export default function App() {
     const m = c?.misiones.find(m => m.id === misId);
     if (!m) return;
     if (m.forma === 'recurrente') {
-      const u = m.completions[m.completions.length - 1];
-      if (u && Date.now() - new Date(u).getTime() < DAY) {
-        m.completions.pop();
-        // eliminar último movimiento de esta misión
-        for (let i = s.movimientos.length - 1; i >= 0; i--) {
-          if (s.movimientos[i].mision_id === misId && s.movimientos[i].tipo === 'mision_completada') {
-            s.movimientos.splice(i, 1); break;
-          }
-        }
-      } else {
-        m.completions.push(nowISO());
-        const monto = puntos(m);
-        pushMov(s, { tipo: 'mision_completada', cam_id: camId, mision_id: misId, monto });
-        pushEv(s, { tipo: 'mision_completada', cam_id: camId, mision_id: misId, nombre: m.nombre, puntos: monto });
-      }
+      // Las recurrentes son pulsos, no toggles. Cada tap = +1 completion.
+      // No hay 'deshacer' (asumimos que la frecuencia de taps accidentales
+      // es baja; si pasa, queda registrado y la vida sigue). Esto soporta
+      // el caso de misiones que se hacen muchas veces en un día —
+      // por ejemplo "saltar el obstáculo".
+      m.completions.push(nowISO());
+      const monto = puntos(m);
+      pushMov(s, { tipo: 'mision_completada', cam_id: camId, mision_id: misId, monto });
+      pushEv(s, { tipo: 'mision_completada', cam_id: camId, mision_id: misId, nombre: m.nombre, puntos: monto });
     } else {
       if (m.estado === 'activa') {
         m.estado = 'hecha'; m.completed_at = nowISO();
@@ -969,11 +967,13 @@ function CamisetaCardHoy({ cam, onToggle, onOpen }) {
 
 function MisionRow({ m, onToggle }) {
   const est = estadoDeMision(m);
-  const hecha = est === 'hecha' || est === 'hecha-hoy';
+  // Recurrentes nunca se ven 'hechas': cada tap es +1, no toggle.
+  const hecha = m.forma !== 'recurrente' && (est === 'hecha' || est === 'hecha-hoy');
   const mult = multiplicador(m);
   const formaGlyph = FORMAS.find(f => f.id === m.forma)?.glyph;
   const p = puntos(m);
   const tonosStr = m.tonos?.map(t => TONOS.find(x => x.id === t)?.label).filter(Boolean).join(' · ');
+  const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
   return (<button onClick={onToggle} className="flex items-start gap-3 py-2 text-left w-full ring-ink check-ani group">
     <span className="flex-shrink-0 mt-1.5 w-4 h-4 rounded-sm flex items-center justify-center check-ani" style={{
       border: '1px solid ' + (hecha ? 'var(--moss)' : 'var(--line)'),
@@ -984,6 +984,7 @@ function MisionRow({ m, onToggle }) {
       textDecoration: hecha ? 'line-through' : 'none', textDecorationThickness: '0.5px',
     }}>{m.nombre}
       <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>{formaGlyph}{tonosStr && ' · ' + tonosStr}</span>
+      {hoy > 0 && <span className="ff-mono text-xs ml-1" style={{ color: 'var(--gold)' }}>· {hoy}× hoy</span>}
     </span>
     <span className="ff-mono text-xs mt-1.5" style={{ color: mult > 1.4 ? 'var(--warm)' : mult < 0.9 ? 'var(--ink-faint)' : 'var(--gold)' }}>+{p}</span>
   </button>);
@@ -1516,11 +1517,14 @@ function ImportSheet({ onClose, onImport }) {
 
 function MisionRowDetail({ m, onToggle, onArchive, onEdit }) {
   const est = estadoDeMision(m);
-  const hecha = est === 'hecha' || est === 'hecha-hoy';
+  // Recurrentes nunca se ven 'hechas': cada tap es +1, no toggle.
+  const hecha = m.forma !== 'recurrente' && (est === 'hecha' || est === 'hecha-hoy');
   const mult = multiplicador(m);
   const formaGlyph = FORMAS.find(f => f.id === m.forma)?.glyph;
   const p = puntos(m);
   const tonosStr = m.tonos?.map(t => TONOS.find(x => x.id === t)?.label).filter(Boolean).join(' · ');
+  const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
+  const mes = m.forma === 'recurrente' ? completionsEsteMes(m) : 0;
   return (<div className="flex items-start gap-2 py-1 group">
     <button onClick={onToggle} className="flex-shrink-0 mt-1.5 ring-ink">
       <span className="w-4 h-4 rounded-sm flex items-center justify-center check-ani block" style={{
@@ -1533,8 +1537,11 @@ function MisionRowDetail({ m, onToggle, onArchive, onEdit }) {
       textDecoration: hecha ? 'line-through' : 'none',
     }}>{m.nombre}
       <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>{formaGlyph}{tonosStr && ' · ' + tonosStr}</span>
-      {m.forma === 'recurrente' && completionsEsteMes(m) > 0 && (
-        <span className="ff-mono text-xs ml-1" style={{ color: 'var(--ink-faint)' }}>· {completionsEsteMes(m)}×/30d</span>
+      {hoy > 0 && (
+        <span className="ff-mono text-xs ml-1" style={{ color: 'var(--gold)' }}>· {hoy}× hoy</span>
+      )}
+      {mes > 0 && (
+        <span className="ff-mono text-xs ml-1" style={{ color: 'var(--ink-faint)' }}>· {mes}×/30d</span>
       )}
     </span>
     <span className="ff-mono text-xs mt-1.5" style={{ color: mult > 1.4 ? 'var(--warm)' : mult < 0.9 ? 'var(--ink-faint)' : 'var(--gold)' }}>+{p}</span>
@@ -2057,6 +2064,9 @@ function SesionDiaria({ cams, onToggle, onArchive, onClose }) {
               <span className="w-4 h-4 mt-1.5 rounded-sm border check-ani" style={{ borderColor: 'var(--line)' }} />
               <span className="flex-1 ff-serif">
                 <span className="text-base mr-2">{m.cam.emoji}</span>{m.nombre}
+                {m.forma === 'recurrente' && completionsHoy(m) > 0 && (
+                  <span className="ff-mono text-xs ml-2" style={{ color: 'var(--gold)' }}>· {completionsHoy(m)}× hoy</span>
+                )}
               </span>
               <span className="ff-mono text-xs mt-1.5" style={{ color: 'var(--gold)' }}>+{puntos(m)}</span>
             </button>
