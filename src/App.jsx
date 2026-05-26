@@ -1465,7 +1465,17 @@ function ImportSheet({ onClose, onImport }) {
       setDecoded(result.camiseta);
       setPhase('preview');
     } catch (e) {
-      setError(e.message || 'No se pudo leer la imagen.');
+      // Heurística simple: las fotos de cámara son JPEG > 500KB con EXIF.
+      // Los PNG del codec rondan 100-180KB; los JPEGs comprimidos por
+      // WhatsApp suelen estar bajo 300KB. Si el archivo se ve a foto de
+      // cámara, damos un mensaje específico — el decoder por cámara aún
+      // no funciona (perspectiva + moiré).
+      const looksLikeCamera = file.type === 'image/jpeg' && file.size > 500_000;
+      if (looksLikeCamera) {
+        setError('Parece una foto tomada con la cámara. Por ahora solo se puede importar la imagen original que te compartieron (por WhatsApp, mail, etc.), no fotos de pantalla. La lectura por cámara va a llegar más adelante.');
+      } else {
+        setError(e.message || 'No se pudo leer la imagen.');
+      }
       setPhase('error');
     }
   }
@@ -1492,11 +1502,11 @@ function ImportSheet({ onClose, onImport }) {
       </p>
       <label className="block ring-ink cursor-pointer p-8 text-center"
         style={{ border: '2px dashed var(--line)', background: 'var(--bg-card)' }}>
-        <input ref={inputRef} type="file" accept="image/*" className="hidden"
+        <input ref={inputRef} type="file" accept="image/png,image/jpeg" className="hidden"
           onChange={(e) => handleFile(e.target.files?.[0])} />
         <Upload size={28} strokeWidth={1.5} className="mx-auto mb-3" style={{ color: 'var(--ink-soft)' }} />
-        <div className="ff-serif text-base mb-1" style={{ color: 'var(--ink)' }}>Elegir imagen</div>
-        <div className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>PNG o JPG desde tu galería</div>
+        <div className="ff-serif text-base mb-1" style={{ color: 'var(--ink)' }}>Elegir imagen recibida</div>
+        <div className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>La que te compartieron — no una foto de pantalla</div>
       </label>
       <p className="ff-mono text-xs mt-6" style={{ color: 'var(--ink-faint)' }}>
         Solo viaja el diseño. Las misiones empiezan en cero — el camino lo haces tú.
