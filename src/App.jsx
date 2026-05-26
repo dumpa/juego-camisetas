@@ -6,7 +6,7 @@ const STATE_KEY = 'juego-camisetas:state:v1';
 const DAY = 86400000;
 
 const emptyState = {
-  user_id: 'local', version: 5, created_at: new Date().toISOString(),
+  user_id: 'local', version: 6, created_at: new Date().toISOString(),
   camisetas: [], sesiones: [], eventos: [], movimientos: [],
 };
 
@@ -38,15 +38,15 @@ function migrate(s) {
   if (!s.movimientos) s.movimientos = [];
   if (!s.user_id) s.user_id = 'local';
   const tipoMap = {
-    rapida: { forma: 'rapida', tonos: [] },
+    rapida: { forma: 'facil', tonos: [] },
     habito: { forma: 'recurrente', tonos: [] },
-    profunda: { forma: 'unica', tonos: ['profunda'] },
-    fisica: { forma: 'unica', tonos: ['fisica'] },
-    emocional: { forma: 'unica', tonos: ['emocional'] },
-    creativa: { forma: 'unica', tonos: ['creativa'] },
-    estrategica: { forma: 'unica', tonos: ['estrategica'] },
+    profunda: { forma: 'dificil', tonos: ['profunda'] },
+    fisica: { forma: 'dificil', tonos: ['fisica'] },
+    emocional: { forma: 'dificil', tonos: ['emocional'] },
+    creativa: { forma: 'dificil', tonos: ['creativa'] },
+    estrategica: { forma: 'dificil', tonos: ['estrategica'] },
   };
-  const pd = { unica: 3, rapida: 1, recurrente: 2 };
+  const pd = { dificil: 3, facil: 1, recurrente: 2 };
   s.camisetas?.forEach(cam => {
     // v4: campos de propiedad/origen para preparar mercado
     if (!cam.creador_id) cam.creador_id = s.user_id;
@@ -55,7 +55,7 @@ function migrate(s) {
     if (cam.precio === undefined) cam.precio = null;
     cam.misiones?.forEach(m => {
       if (!m.forma) {
-        const mapped = tipoMap[m.tipo] || { forma: 'unica', tonos: [] };
+        const mapped = tipoMap[m.tipo] || { forma: 'dificil', tonos: [] };
         m.forma = mapped.forma; m.tonos = mapped.tonos;
       }
       if (!m.tonos) m.tonos = [];
@@ -106,7 +106,19 @@ function migrate(s) {
       }
     });
   }
-  s.version = 5;
+  // v6: rename forma values to use difficulty-aligned names.
+  //   rapida → facil (era "una vez, fácil/poco peso")
+  //   unica → dificil (era "una vez, importante/peso real")
+  //   recurrente queda como recurrente
+  if (s.version < 6) {
+    s.camisetas?.forEach(cam => {
+      cam.misiones?.forEach(m => {
+        if (m.forma === 'rapida') m.forma = 'facil';
+        else if (m.forma === 'unica') m.forma = 'dificil';
+      });
+    });
+  }
+  s.version = 6;
   return s;
 }
 
@@ -114,9 +126,9 @@ const uid = () => Math.random().toString(36).slice(2, 11);
 const nowISO = () => new Date().toISOString();
 
 const FORMAS = [
-  { id: 'unica',      label: 'única',      hint: 'una vez y ya',      puntosBase: 3, glyph: '◇' },
-  { id: 'rapida',     label: 'rápida',     hint: 'minutos, ya',       puntosBase: 1, glyph: '·' },
-  { id: 'recurrente', label: 'recurrente', hint: 'hábito que vuelve', puntosBase: 2, glyph: '⟳' },
+  { id: 'dificil',    label: 'difícil',    hint: 'una vez, importante', puntosBase: 3, glyph: '◇' },
+  { id: 'facil',      label: 'fácil',      hint: 'minutos, simple',     puntosBase: 1, glyph: '·' },
+  { id: 'recurrente', label: 'recurrente', hint: 'hábito que vuelve',   puntosBase: 2, glyph: '⟳' },
 ];
 const TONOS = [
   { id: 'profunda',    label: 'profunda' },
@@ -140,11 +152,11 @@ const CATALOGO = [
     precio: 0,
     creador_id: 'dumpa',
     misiones: [
-      { nombre: 'Saltar sobre algo',                       forma: 'rapida',     tonos: ['fisica'],            puntos_base: 1 },
-      { nombre: 'Pasar por debajo de algo',                forma: 'rapida',     tonos: ['fisica'],            puntos_base: 1 },
-      { nombre: 'Encontrar un portal',                     forma: 'unica',      tonos: ['creativa','emocional'], puntos_base: 3 },
-      { nombre: 'Meterse a un río o lago',                 forma: 'unica',      tonos: ['fisica','emocional'], puntos_base: 3 },
-      { nombre: 'Probar algo que nunca has probado',       forma: 'unica',      tonos: ['creativa'],          puntos_base: 2 },
+      { nombre: 'Saltar sobre algo',                       forma: 'facil',     tonos: ['fisica'],            puntos_base: 1 },
+      { nombre: 'Pasar por debajo de algo',                forma: 'facil',     tonos: ['fisica'],            puntos_base: 1 },
+      { nombre: 'Encontrar un portal',                     forma: 'dificil',      tonos: ['creativa','emocional'], puntos_base: 3 },
+      { nombre: 'Meterse a un río o lago',                 forma: 'dificil',      tonos: ['fisica','emocional'], puntos_base: 3 },
+      { nombre: 'Probar algo que nunca has probado',       forma: 'dificil',      tonos: ['creativa'],          puntos_base: 2 },
       { nombre: 'Una cita con la curiosidad',              forma: 'recurrente', tonos: ['emocional','creativa'], puntos_base: 2 },
     ],
     milestones: [],
@@ -158,10 +170,10 @@ const CATALOGO = [
     precio: 15,
     creador_id: 'dumpa',
     misiones: [
-      { nombre: 'Hacer algo y dárselo a alguien',          forma: 'unica',      tonos: ['creativa','emocional'], puntos_base: 3 },
-      { nombre: 'Combinar dos cosas que no van juntas',    forma: 'rapida',     tonos: ['creativa'],          puntos_base: 1 },
-      { nombre: 'Crear algo efímero (menos de un día)',    forma: 'unica',      tonos: ['creativa'],          puntos_base: 2 },
-      { nombre: 'Cambiar algo de tu entorno',              forma: 'rapida',     tonos: ['creativa'],          puntos_base: 1 },
+      { nombre: 'Hacer algo y dárselo a alguien',          forma: 'dificil',      tonos: ['creativa','emocional'], puntos_base: 3 },
+      { nombre: 'Combinar dos cosas que no van juntas',    forma: 'facil',     tonos: ['creativa'],          puntos_base: 1 },
+      { nombre: 'Crear algo efímero (menos de un día)',    forma: 'dificil',      tonos: ['creativa'],          puntos_base: 2 },
+      { nombre: 'Cambiar algo de tu entorno',              forma: 'facil',     tonos: ['creativa'],          puntos_base: 1 },
       { nombre: 'Solución absurda primero',                forma: 'recurrente', tonos: ['creativa','estrategica'], puntos_base: 2 },
       { nombre: 'Hacer algo sin ninguna utilidad',         forma: 'recurrente', tonos: ['creativa'],          puntos_base: 2 },
     ],
@@ -373,7 +385,7 @@ export default function App() {
     const pb = data.puntos_base ?? FORMAS.find(f => f.id === data.forma)?.puntosBase ?? 1;
     const id = uid();
     c.misiones.push({
-      id, nombre: data.nombre, forma: data.forma || 'unica', tonos: data.tonos || [],
+      id, nombre: data.nombre, forma: data.forma || 'dificil', tonos: data.tonos || [],
       puntos_base: pb, estado: 'activa', created_at: nowISO(),
       completed_at: null, archived_at: null, completions: [],
       autor_id: s.user_id, asignada_por: null,
@@ -967,18 +979,22 @@ function CamisetaCardHoy({ cam, onToggle, onOpen }) {
 
 function MisionRow({ m, onToggle }) {
   const est = estadoDeMision(m);
-  // Recurrentes nunca se ven 'hechas': cada tap es +1, no toggle.
+  // Non-recurrentes: 'hecha' es estado terminal con check verde + tachado.
+  // Recurrentes con completion hoy: tick verde, nombre legible (sin tachar) —
+  // sigue viva y se puede volver a tocar.
   const hecha = m.forma !== 'recurrente' && (est === 'hecha' || est === 'hecha-hoy');
+  const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
+  const tickHoy = hoy > 0;
+  const showCheck = hecha || tickHoy;
   const mult = multiplicador(m);
   const formaGlyph = FORMAS.find(f => f.id === m.forma)?.glyph;
   const p = puntos(m);
   const tonosStr = m.tonos?.map(t => TONOS.find(x => x.id === t)?.label).filter(Boolean).join(' · ');
-  const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
   return (<button onClick={onToggle} className="flex items-start gap-3 py-2 text-left w-full ring-ink check-ani group">
     <span className="flex-shrink-0 mt-1.5 w-4 h-4 rounded-sm flex items-center justify-center check-ani" style={{
-      border: '1px solid ' + (hecha ? 'var(--moss)' : 'var(--line)'),
-      background: hecha ? 'var(--moss)' : 'transparent',
-    }}>{hecha && <Check size={11} strokeWidth={3} color="var(--bg)" />}</span>
+      border: '1px solid ' + (showCheck ? 'var(--moss)' : 'var(--line)'),
+      background: showCheck ? 'var(--moss)' : 'transparent',
+    }}>{showCheck && <Check size={11} strokeWidth={3} color="var(--bg)" />}</span>
     <span className="flex-1 ff-serif text-base" style={{
       color: hecha ? 'var(--ink-faint)' : 'var(--ink)',
       textDecoration: hecha ? 'line-through' : 'none', textDecorationThickness: '0.5px',
@@ -1517,20 +1533,21 @@ function ImportSheet({ onClose, onImport }) {
 
 function MisionRowDetail({ m, onToggle, onArchive, onEdit }) {
   const est = estadoDeMision(m);
-  // Recurrentes nunca se ven 'hechas': cada tap es +1, no toggle.
   const hecha = m.forma !== 'recurrente' && (est === 'hecha' || est === 'hecha-hoy');
+  const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
+  const tickHoy = hoy > 0;
+  const showCheck = hecha || tickHoy;
   const mult = multiplicador(m);
   const formaGlyph = FORMAS.find(f => f.id === m.forma)?.glyph;
   const p = puntos(m);
   const tonosStr = m.tonos?.map(t => TONOS.find(x => x.id === t)?.label).filter(Boolean).join(' · ');
-  const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
   const mes = m.forma === 'recurrente' ? completionsEsteMes(m) : 0;
   return (<div className="flex items-start gap-2 py-1 group">
     <button onClick={onToggle} className="flex-shrink-0 mt-1.5 ring-ink">
       <span className="w-4 h-4 rounded-sm flex items-center justify-center check-ani block" style={{
-        border: '1px solid ' + (hecha ? 'var(--moss)' : 'var(--line)'),
-        background: hecha ? 'var(--moss)' : 'transparent',
-      }}>{hecha && <Check size={11} strokeWidth={3} color="var(--bg)" />}</span>
+        border: '1px solid ' + (showCheck ? 'var(--moss)' : 'var(--line)'),
+        background: showCheck ? 'var(--moss)' : 'transparent',
+      }}>{showCheck && <Check size={11} strokeWidth={3} color="var(--bg)" />}</span>
     </button>
     <span className="flex-1 ff-serif" style={{
       color: hecha ? 'var(--ink-faint)' : 'var(--ink)',
@@ -1556,9 +1573,9 @@ function MisionRowDetail({ m, onToggle, onArchive, onEdit }) {
 
 function MisionForm({ initial, onSave, onCancel }) {
   const [nombre, setNombre] = useState(initial?.nombre || '');
-  const [forma, setForma] = useState(initial?.forma || 'unica');
+  const [forma, setForma] = useState(initial?.forma || 'dificil');
   const [tonos, setTonos] = useState(initial?.tonos || []);
-  const [puntosBase, setPuntosBase] = useState(initial?.puntos_base ?? (FORMAS.find(f => f.id === (initial?.forma || 'unica'))?.puntosBase || 1));
+  const [puntosBase, setPuntosBase] = useState(initial?.puntos_base ?? (FORMAS.find(f => f.id === (initial?.forma || 'dificil'))?.puntosBase || 1));
   const toggleTono = (t) => setTonos(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
   const submit = () => { if (!nombre.trim()) return; onSave({ nombre: nombre.trim(), forma, tonos, puntos_base: puntosBase }); };
   return (<div className="p-3 mb-3 fade-up" style={{ background: 'var(--bg-card)', border: '1px solid var(--line)' }}>
@@ -2058,14 +2075,20 @@ function SesionDiaria({ cams, onToggle, onArchive, onClose }) {
     {activas.length > 0 && (<>
       <div className="smallcaps mb-3" style={{ color: 'var(--ink-faint)' }}>vivas</div>
       <div className="space-y-1 mb-8">
-        {activas.map(m => (
+        {activas.map(m => {
+          const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
+          const tickHoy = hoy > 0;
+          return (
           <div key={m.id} className="flex items-start gap-2 py-1" style={{ borderBottom: '1px solid var(--line-soft)' }}>
             <button onClick={() => onToggle(m.cam.id, m.id)} className="flex items-start gap-3 py-1 text-left flex-1 ring-ink">
-              <span className="w-4 h-4 mt-1.5 rounded-sm border check-ani" style={{ borderColor: 'var(--line)' }} />
+              <span className="w-4 h-4 mt-1.5 rounded-sm border flex items-center justify-center check-ani" style={{
+                borderColor: tickHoy ? 'var(--moss)' : 'var(--line)',
+                background: tickHoy ? 'var(--moss)' : 'transparent',
+              }}>{tickHoy && <Check size={10} strokeWidth={3} color="var(--bg)" />}</span>
               <span className="flex-1 ff-serif">
                 <span className="text-base mr-2">{m.cam.emoji}</span>{m.nombre}
-                {m.forma === 'recurrente' && completionsHoy(m) > 0 && (
-                  <span className="ff-mono text-xs ml-2" style={{ color: 'var(--gold)' }}>· {completionsHoy(m)}× hoy</span>
+                {hoy > 0 && (
+                  <span className="ff-mono text-xs ml-2" style={{ color: 'var(--gold)' }}>· {hoy}× hoy</span>
                 )}
               </span>
               <span className="ff-mono text-xs mt-1.5" style={{ color: 'var(--gold)' }}>+{puntos(m)}</span>
@@ -2087,7 +2110,7 @@ function SesionDiaria({ cams, onToggle, onArchive, onClose }) {
               </button>
             )}
           </div>
-        ))}
+        );})}
       </div>
     </>)}
     <div className="hr-deco mb-6" />
@@ -2109,7 +2132,7 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
   const totalSteps = cams.length + 2;
   const finish = () => {
     Object.entries(nuevas).forEach(([camId, m]) => {
-      if (m?.nombre?.trim()) onAddMision(camId, { nombre: m.nombre.trim(), forma: m.forma || 'unica', tonos: m.tonos || [], puntos_base: m.puntos_base });
+      if (m?.nombre?.trim()) onAddMision(camId, { nombre: m.nombre.trim(), forma: m.forma || 'dificil', tonos: m.tonos || [], puntos_base: m.puntos_base });
     });
     onClose({ notas: notas.trim(), caliente, fria });
   };
@@ -2122,7 +2145,7 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
     {step < cams.length && (() => {
       const cam = cams[step];
       const activas = cam.misiones.filter(m => enJuego(m));
-      const nueva = nuevas[cam.id] || { nombre: '', forma: 'unica', tonos: [] };
+      const nueva = nuevas[cam.id] || { nombre: '', forma: 'dificil', tonos: [] };
       return (<div className="fade-up">
         <div className="text-4xl mb-2">{cam.emoji}</div>
         <h2 className="display text-3xl mb-2">{cam.nombre}</h2>
@@ -2144,9 +2167,9 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
         {nueva.nombre.trim() && (<div className="flex flex-wrap gap-1 mb-3">
           {FORMAS.map(f => (
             <button key={f.id} onClick={() => setNuevas({ ...nuevas, [cam.id]: { ...nueva, forma: f.id } })} className="ff-mono text-xs px-2 py-1 ring-ink" style={{
-              background: (nueva.forma || 'unica') === f.id ? 'var(--ink)' : 'transparent',
-              color: (nueva.forma || 'unica') === f.id ? 'var(--bg)' : 'var(--ink-soft)',
-              border: '1px solid ' + ((nueva.forma || 'unica') === f.id ? 'var(--ink)' : 'var(--line)'),
+              background: (nueva.forma || 'dificil') === f.id ? 'var(--ink)' : 'transparent',
+              color: (nueva.forma || 'dificil') === f.id ? 'var(--bg)' : 'var(--ink-soft)',
+              border: '1px solid ' + ((nueva.forma || 'dificil') === f.id ? 'var(--ink)' : 'var(--line)'),
             }}>{f.glyph} {f.label}</button>
           ))}
         </div>)}
