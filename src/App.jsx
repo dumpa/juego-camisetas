@@ -195,6 +195,16 @@ function estadoDeMision(m) {
   }
   return m.estado;
 }
+// Una misión está "en juego" si vive en los buckets activos (CamisetaDetail,
+// SesionDiaria, cuenta de la card en CamisetasView). Las recurrentes nunca
+// desaparecen del bucket activo al completarse: siguen visibles ahí, sólo
+// que con el visual de "hecha hoy" (check + tachado), porque hacer una
+// recurrente no significa que dejó de existir — significa que ya tocó hoy.
+function enJuego(m) {
+  if (m.estado === 'archivada') return false;
+  if (m.forma === 'recurrente') return true;
+  return m.estado === 'activa';
+}
 function completionsEsteMes(m) {
   const l = Date.now() - 30 * DAY;
   return m.completions.filter(c => new Date(c).getTime() > l).length;
@@ -995,7 +1005,7 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
     </div>
     <div className="grid gap-3">
       {activas.map((cam, i) => {
-        const act = cam.misiones.filter(m => estadoDeMision(m) === 'activa').length;
+        const act = cam.misiones.filter(m => enJuego(m)).length;
         const hechasTot = cam.misiones.reduce((acc, m) => acc + (m.completed_at ? 1 : 0) + (m.completions?.length || 0), 0);
         const puntosTot = puntosCamiseta(movimientos, cam.id);
         const canUp = i > 0;
@@ -1054,8 +1064,8 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onAr
   const [editingCam, setEditingCam] = useState(false);
   const [confirmRetiro, setConfirmRetiro] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const activas = cam.misiones.filter(m => estadoDeMision(m) === 'activa');
-  const hechas = cam.misiones.filter(m => m.estado === 'hecha' || estadoDeMision(m) === 'hecha-hoy');
+  const activas = cam.misiones.filter(m => enJuego(m));
+  const hechas = cam.misiones.filter(m => m.estado === 'hecha' && m.forma !== 'recurrente');
   const archivadas = cam.misiones.filter(m => m.estado === 'archivada');
 
   // Auto-cancela el confirmar después de 4s
@@ -2010,10 +2020,12 @@ function SesionDiaria({ cams, onToggle, onArchive, onClose }) {
   const [notas, setNotas] = useState('');
   const [confirmArchive, setConfirmArchive] = useState(null);
   const today = new Date().toDateString();
-  const activas = cams.flatMap(c => c.misiones.filter(m => estadoDeMision(m) === 'activa').map(m => ({ ...m, cam: c })));
+  const activas = cams.flatMap(c => c.misiones.filter(m => enJuego(m)).map(m => ({ ...m, cam: c })));
+  // 'ya marcadas hoy' es solo para no-recurrentes: las recurrentes hechas hoy
+  // se quedan en 'vivas' con el check tachado y no se duplican aquí.
   const hechasHoy = cams.flatMap(c => c.misiones.filter(m => {
+    if (m.forma === 'recurrente') return false;
     if (m.completed_at && new Date(m.completed_at).toDateString() === today) return true;
-    if (m.completions?.some(x => new Date(x).toDateString() === today)) return true;
     return false;
   }).map(m => ({ ...m, cam: c })));
   return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
@@ -2099,7 +2111,7 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
     <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{step + 1} / {totalSteps}</div>
     {step < cams.length && (() => {
       const cam = cams[step];
-      const activas = cam.misiones.filter(m => estadoDeMision(m) === 'activa');
+      const activas = cam.misiones.filter(m => enJuego(m));
       const nueva = nuevas[cam.id] || { nombre: '', forma: 'unica', tonos: [] };
       return (<div className="fade-up">
         <div className="text-4xl mb-2">{cam.emoji}</div>
