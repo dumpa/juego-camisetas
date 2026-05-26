@@ -587,7 +587,7 @@ export default function App() {
   return (<Frame><Header puntos={puntosUser} warn={state._saveError} />
     <main className="px-5 pb-32 pt-2 max-w-2xl mx-auto">
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
-      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} />}
+      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onRevive={reviveCamiseta} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion} />}
     </main>
     <TabBar tab={tab} setTab={setTab} />
@@ -1031,7 +1031,7 @@ function MisionRow({ m, onToggle, onUndo }) {
   </div>);
 }
 
-function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, onImport, onReorder }) {
+function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, onImport, onReorder, onRevive }) {
   const activas = cams.filter(c => !c.archived_at);
   const archivadas = cams.filter(c => c.archived_at);
   return (<div className="fade-up">
@@ -1085,16 +1085,32 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
         </div>);
       })}
     </div>
-    {archivadas.length > 0 && (<details className="mt-10">
-      <summary className="smallcaps cursor-pointer" style={{ color: 'var(--ink-faint)' }}>{archivadas.length} retiradas</summary>
-      <div className="mt-3 space-y-1">
+    {archivadas.length > 0 && (<>
+      <div className="mt-12 mb-2 flex items-baseline justify-between">
+        <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Closet</span>
+        <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{archivadas.length} {archivadas.length === 1 ? 'camiseta' : 'camisetas'}</span>
+      </div>
+      <p className="ff-serif italic text-sm mb-4" style={{ color: 'var(--ink-faint)' }}>Visibles, fuera del juego. Las puedes volver al mazo cuando quieras.</p>
+      <div className="grid gap-3">
         {archivadas.map(cam => (
-          <button key={cam.id} onClick={() => onOpen(cam.id)} className="block w-full text-left py-1 ff-serif ring-ink" style={{ color: 'var(--ink-faint)' }}>
-            <span className="mr-2">{cam.emoji}</span>{cam.nombre}
-          </button>
+          <div key={cam.id} className="flex" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2, opacity: 0.7 }}>
+            <button onClick={() => onRevive(cam.id)}
+              className="ring-ink px-3 flex items-center justify-center border-r"
+              style={{ borderColor: 'var(--line-soft)', color: 'var(--moss)' }}
+              aria-label="Devolver al mazo">
+              <RotateCcw size={16} strokeWidth={1.5} />
+            </button>
+            <button onClick={() => onOpen(cam.id)} className="text-left p-4 ring-ink flex-1">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{cam.emoji}</span>
+                <span className="ff-serif text-lg flex-1">{cam.nombre}</span>
+                <ChevronRight size={18} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
+              </div>
+            </button>
+          </div>
         ))}
       </div>
-    </details>)}
+    </>)}
   </div>);
 }
 
@@ -1140,7 +1156,7 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUn
     </div>
     <h1 className="display text-4xl md:text-5xl mb-2">
       {cam.nombre}
-      {cam.archived_at && <span className="ff-mono text-xs ml-3 align-middle" style={{ color: 'var(--ink-faint)' }}>retirada</span>}
+      {cam.archived_at && <span className="ff-mono text-xs ml-3 align-middle" style={{ color: 'var(--ink-faint)' }}>en closet</span>}
     </h1>
     {cam.arco && (<div className="ff-mono text-xs mb-3" style={{ color: 'var(--ink-soft)' }}>
       {cam.arco.de} <span style={{ color: 'var(--ink-faint)' }}>→</span> {cam.arco.a}
@@ -1243,21 +1259,21 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUn
       {!cam.archived_at ? (
         confirmRetiro ? (
           <div className="flex items-center gap-3 fade-up">
-            <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-soft)' }}>¿retirar «{cam.nombre}»?</span>
+            <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-soft)' }}>¿«{cam.nombre}» al closet?</span>
             <button onClick={() => { onArchiveCam(); }} className="ff-mono text-xs ring-ink px-3 py-1"
-              style={{ background: 'var(--accent)', color: 'var(--bg)' }}>sí, retirar</button>
+              style={{ background: 'var(--accent)', color: 'var(--bg)' }}>sí, al closet</button>
             <button onClick={() => setConfirmRetiro(false)} className="ff-mono text-xs ring-ink px-3 py-1"
               style={{ color: 'var(--ink-faint)' }}>no</button>
           </div>
         ) : (
           <button onClick={() => setConfirmRetiro(true)} className="ff-mono text-xs ring-ink py-2"
-            style={{ color: 'var(--ink-faint)' }}>retirar esta camiseta</button>
+            style={{ color: 'var(--ink-faint)' }}>guardar en el closet</button>
         )
       ) : (
         <div className="flex items-center gap-3">
-          <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>esta camiseta está retirada</span>
+          <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>esta camiseta vive en el closet</span>
           <button onClick={onReviveCam} className="ff-mono text-xs ring-ink py-1 px-3"
-            style={{ color: 'var(--moss)', border: '1px solid var(--moss)' }}>recuperarla</button>
+            style={{ color: 'var(--moss)', border: '1px solid var(--moss)' }}>al mazo</button>
         </div>
       )}
     </div>
@@ -1976,10 +1992,10 @@ function EventoItem({ e, cam, lookupCam }) {
       text = <>recibes <strong>{e.emoji} {e.nombre}</strong>{e.creador && e.creador !== 'desconocido' && <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>de @{e.creador}</span>}</>; break;
     case 'camiseta_retirada':
       glyph = '◇'; color = 'var(--ink-faint)';
-      text = <>se retira <em>{e.nombre}</em></>; break;
+      text = <>al closet <em>{e.nombre}</em></>; break;
     case 'camiseta_recuperada':
       glyph = '◇'; color = 'var(--moss)';
-      text = <>vuelve <strong>{e.nombre}</strong></>; break;
+      text = <>vuelve al mazo <strong>{e.nombre}</strong></>; break;
     case 'camiseta_editada':
       glyph = '~'; color = 'var(--ink-faint)';
       text = <>editada <em>{e.nombre}</em></>; break;
