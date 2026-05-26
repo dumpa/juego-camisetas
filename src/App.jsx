@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Check, X, ChevronLeft, ChevronRight, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle } from 'lucide-react';
+import { Plus, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter } from 'lucide-react';
 import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta } from './codec/index.js';
 
 const STATE_KEY = 'juego-camisetas:state:v1';
 const DAY = 86400000;
 
 const emptyState = {
-  user_id: 'local', version: 4, created_at: new Date().toISOString(),
+  user_id: 'local', version: 5, created_at: new Date().toISOString(),
   camisetas: [], sesiones: [], eventos: [], movimientos: [],
 };
 
@@ -96,7 +96,17 @@ function migrate(s) {
       });
     });
   }
-  s.version = 4;
+  // v5: corrige eventos de cierre cuyo tipo quedó como 'diaria'/'semanal'/
+  // 'mensual' debido al bug del spread en logSesion. Renombra a 'sesion_*'
+  // para que el EventoItem switch, el filtro y el acordeón los reconozcan.
+  if (s.version < 5) {
+    s.eventos?.forEach(e => {
+      if (e.tipo === 'diaria' || e.tipo === 'semanal' || e.tipo === 'mensual') {
+        e.tipo = `sesion_${e.tipo}`;
+      }
+    });
+  }
+  s.version = 5;
   return s;
 }
 
@@ -435,10 +445,32 @@ export default function App() {
     ms.regalo_cobrado_at = nowISO();
     pushEv(s, { tipo: 'milestone_cobrado', cam_id: camId, ms_id: msId, nombre: ms.nombre, regalo: ms.regalo });
   });
+  const editMilestone = (camId, msId, data) => update(s => {
+    const ms = s.camisetas.find(c => c.id === camId)?.milestones.find(m => m.id === msId);
+    if (!ms) return;
+    Object.assign(ms, data);
+    pushEv(s, { tipo: 'milestone_editado', cam_id: camId, ms_id: msId, nombre: ms.nombre });
+  });
+  // Move a camiseta up/down in the persistent order. dir = -1 (up) | +1 (down).
+  // We move within the full s.camisetas array so it works whether the camiseta
+  // is active or archived; UI lists filter on top.
+  const reorderCamiseta = (camId, dir) => update(s => {
+    const idx = s.camisetas.findIndex(c => c.id === camId);
+    if (idx === -1) return;
+    const target = idx + dir;
+    if (target < 0 || target >= s.camisetas.length) return;
+    const [moved] = s.camisetas.splice(idx, 1);
+    s.camisetas.splice(target, 0, moved);
+  });
   const logSesion = (data) => update(s => {
     const id = uid();
     s.sesiones.push({ id, date: nowISO(), ...data });
-    pushEv(s, { tipo: `sesion_${data.tipo}`, sesion_id: id, notas: data.notas, ...data });
+    // Note: ...data goes FIRST so the explicit fields below (especially tipo)
+    // win over data.tipo ('diaria'/'semanal'/'mensual'). Putting the spread
+    // last was the original bug — it left e.tipo as 'diaria' instead of
+    // 'sesion_diaria', breaking the EventoItem switch + cierres filter +
+    // accordion. The v5 migration fixes legacy events on load.
+    pushEv(s, { ...data, tipo: `sesion_${data.tipo}`, sesion_id: id, notas: data.notas });
   });
 
   if (!state) return <Loading />;
@@ -499,11 +531,12 @@ export default function App() {
       onAddMilestone={(m) => addMilestone(cam.id, m)}
       onToggleMilestone={(id) => toggleMilestone(cam.id, id)}
       onCobrarMilestone={(id) => cobrarMilestone(cam.id, id)}
+      onEditMilestone={(id, d) => editMilestone(cam.id, id, d)}
       onEditCam={(d) => editCamiseta(cam.id, d)}
       onReviveCam={() => reviveCamiseta(cam.id)}
       onArchiveCam={() => { archiveCamiseta(cam.id); setOpenCam(null); }} /></Frame>;
   }
-  if (sesion === 'diaria') return <Frame><SesionDiaria cams={camsActivas} onToggle={toggleMision}
+  if (sesion === 'diaria') return <Frame><SesionDiaria cams={camsActivas} onToggle={toggleMision} onArchive={archiveMision}
     onClose={(n) => { if (n) logSesion({ tipo: 'diaria', notas: n }); setSesion(null); }} /></Frame>;
   if (sesion === 'semanal') return <Frame><SesionSemanal cams={camsActivas}
     onArchiveMision={archiveMision} onEditMision={editMision} onAddMision={addMision}
@@ -517,7 +550,7 @@ export default function App() {
   return (<Frame><Header puntos={puntosUser} warn={state._saveError} />
     <main className="px-5 pb-32 pt-2 max-w-2xl mx-auto">
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onOpen={setOpenCam} />}
-      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} />}
+      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion} />}
     </main>
     <TabBar tab={tab} setTab={setTab} />
@@ -946,7 +979,7 @@ function MisionRow({ m, onToggle }) {
   </button>);
 }
 
-function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, onImport }) {
+function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, onImport, onReorder }) {
   const activas = cams.filter(c => !c.archived_at);
   const archivadas = cams.filter(c => c.archived_at);
   return (<div className="fade-up">
@@ -961,25 +994,43 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
       </div>
     </div>
     <div className="grid gap-3">
-      {activas.map(cam => {
+      {activas.map((cam, i) => {
         const act = cam.misiones.filter(m => estadoDeMision(m) === 'activa').length;
         const hechasTot = cam.misiones.reduce((acc, m) => acc + (m.completed_at ? 1 : 0) + (m.completions?.length || 0), 0);
         const puntosTot = puntosCamiseta(movimientos, cam.id);
-        return (<button key={cam.id} onClick={() => onOpen(cam.id)} className="text-left p-5 ring-ink" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2 }}>
-          <div className="flex items-start gap-4">
-            <span className="text-3xl">{cam.emoji}</span>
-            <div className="flex-1 min-w-0">
-              <h3 className="ff-serif text-2xl mb-1">{cam.nombre}</h3>
-              {cam.arco && <div className="ff-mono text-xs mb-2" style={{ color: 'var(--ink-faint)' }}>{cam.arco.de} → {cam.arco.a}</div>}
-              {cam.esencia && <p className="ff-serif italic text-sm leading-snug" style={{ color: 'var(--ink-soft)' }}>{cam.esencia}</p>}
-              <div className="ff-mono text-xs mt-3" style={{ color: 'var(--ink-faint)' }}>
-                {act} activas · {hechasTot} hechas
-                {puntosTot > 0 && <> · <span style={{ color: 'var(--gold)' }}>{round1(puntosTot)} pts</span></>}
-              </div>
+        const canUp = i > 0;
+        const canDown = i < activas.length - 1;
+        return (<div key={cam.id} className="flex" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2 }}>
+          {activas.length > 1 && (
+            <div className="flex flex-col border-r" style={{ borderColor: 'var(--line-soft)' }}>
+              <button onClick={() => onReorder(cam.id, -1)} disabled={!canUp}
+                className="ring-ink p-1.5 disabled:opacity-20"
+                style={{ color: 'var(--ink-faint)' }} aria-label="Subir camiseta">
+                <ChevronUp size={16} strokeWidth={1.5} />
+              </button>
+              <button onClick={() => onReorder(cam.id, +1)} disabled={!canDown}
+                className="ring-ink p-1.5 disabled:opacity-20"
+                style={{ color: 'var(--ink-faint)' }} aria-label="Bajar camiseta">
+                <ChevronDown size={16} strokeWidth={1.5} />
+              </button>
             </div>
-            <ChevronRight size={20} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
-          </div>
-        </button>);
+          )}
+          <button onClick={() => onOpen(cam.id)} className="text-left p-5 ring-ink flex-1">
+            <div className="flex items-start gap-4">
+              <span className="text-3xl">{cam.emoji}</span>
+              <div className="flex-1 min-w-0">
+                <h3 className="ff-serif text-2xl mb-1">{cam.nombre}</h3>
+                {cam.arco && <div className="ff-mono text-xs mb-2" style={{ color: 'var(--ink-faint)' }}>{cam.arco.de} → {cam.arco.a}</div>}
+                {cam.esencia && <p className="ff-serif italic text-sm leading-snug" style={{ color: 'var(--ink-soft)' }}>{cam.esencia}</p>}
+                <div className="ff-mono text-xs mt-3" style={{ color: 'var(--ink-faint)' }}>
+                  {act} activas · {hechasTot} hechas
+                  {puntosTot > 0 && <> · <span style={{ color: 'var(--gold)' }}>{round1(puntosTot)} pts</span></>}
+                </div>
+              </div>
+              <ChevronRight size={20} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
+            </div>
+          </button>
+        </div>);
       })}
     </div>
     {archivadas.length > 0 && (<details className="mt-10">
@@ -995,10 +1046,11 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
   </div>);
 }
 
-function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onArchive, onRevive, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditCam, onReviveCam, onArchiveCam }) {
+function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onArchive, onRevive, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam }) {
   const [adding, setAdding] = useState(false);
   const [addingMs, setAddingMs] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [editingMs, setEditingMs] = useState(null);
   const [editingCam, setEditingCam] = useState(false);
   const [confirmRetiro, setConfirmRetiro] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -1092,8 +1144,13 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onAr
         const tieneRegalo = ms.regalo && ms.regalo.trim();
         const cobrado = !!ms.regalo_cobrado_at;
         const porCobrar = logrado && tieneRegalo && !cobrado;
+        if (editingMs === ms.id) {
+          return <MilestoneForm key={ms.id} initial={ms} submitLabel="guardar"
+            onSave={(d) => { onEditMilestone(ms.id, d); setEditingMs(null); }}
+            onCancel={() => setEditingMs(null)} />;
+        }
         return (
-          <div key={ms.id} className="py-1">
+          <div key={ms.id} className="py-1 group">
             <div className="flex items-start gap-3">
               <button onClick={() => onToggleMilestone(ms.id)} className="flex-shrink-0 mt-1.5 ring-ink check-ani">
                 <span className="block w-4 h-4 rotate-45 check-ani" style={{
@@ -1116,6 +1173,13 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onAr
                   className="ring-ink ff-mono text-xs py-1 px-2 fade-up"
                   style={{ background: 'var(--gold)', color: 'var(--bg)' }}>
                   cobrar
+                </button>
+              )}
+              {!cobrado && (
+                <button onClick={() => setEditingMs(ms.id)}
+                  className="ring-ink ff-mono text-xs py-1 px-2"
+                  style={{ color: 'var(--ink-faint)' }} aria-label="Editar milestone">
+                  <Edit2 size={12} strokeWidth={1.5} />
                 </button>
               )}
             </div>
@@ -1518,10 +1582,10 @@ function MisionForm({ initial, onSave, onCancel }) {
   </div>);
 }
 
-function AddMilestone({ onSave, onCancel }) {
-  const [nombre, setNombre] = useState('');
-  const [descripcion, setDescripcion] = useState('');
-  const [regalo, setRegalo] = useState('');
+function MilestoneForm({ initial, onSave, onCancel, submitLabel }) {
+  const [nombre, setNombre] = useState(initial?.nombre || '');
+  const [descripcion, setDescripcion] = useState(initial?.descripcion || '');
+  const [regalo, setRegalo] = useState(initial?.regalo || '');
   return (<div className="p-3 mb-3 fade-up" style={{ background: 'var(--bg-card)', border: '1px solid var(--line)' }}>
     <input autoFocus value={nombre} onChange={e => setNombre(e.target.value)} placeholder="hito" className="w-full ff-serif text-base pb-1 mb-2 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
     <input value={descripcion} onChange={e => setDescripcion(e.target.value)} placeholder="contexto (opcional)" className="w-full ff-mono text-xs pb-1 mb-3 ring-ink" style={{ borderBottom: '1px solid var(--line)', color: 'var(--ink-soft)' }} />
@@ -1529,9 +1593,13 @@ function AddMilestone({ onSave, onCancel }) {
     <input value={regalo} onChange={e => setRegalo(e.target.value)} placeholder="lo que cobrarás al llegar…" className="w-full ff-serif italic text-sm pb-1 mb-3 ring-ink" style={{ borderBottom: '1px solid var(--line)', color: 'var(--gold)' }} />
     <div className="flex justify-end gap-2">
       <button onClick={onCancel} className="ring-ink ff-mono text-xs px-2 py-1" style={{ color: 'var(--ink-faint)' }}>cancelar</button>
-      <button onClick={() => nombre.trim() && onSave({ nombre: nombre.trim(), descripcion: descripcion.trim(), regalo: regalo.trim() })} disabled={!nombre.trim()} className="ring-ink ff-mono text-xs px-3 py-1 disabled:opacity-30" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>añadir</button>
+      <button onClick={() => nombre.trim() && onSave({ nombre: nombre.trim(), descripcion: descripcion.trim(), regalo: regalo.trim() })} disabled={!nombre.trim()} className="ring-ink ff-mono text-xs px-3 py-1 disabled:opacity-30" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>{submitLabel || 'añadir'}</button>
     </div>
   </div>);
+}
+
+function AddMilestone({ onSave, onCancel }) {
+  return <MilestoneForm onSave={onSave} onCancel={onCancel} submitLabel="añadir" />;
 }
 
 function DiarioView({ state, onStart }) {
@@ -1756,35 +1824,79 @@ function Heatmap({ state }) {
 }
 
 function Historia({ state }) {
-  const eventos = [...(state.eventos || [])].reverse();
-  if (eventos.length === 0) return <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Aún no hay nada que contar. La historia empieza con la primera misión.</p>;
+  const cams = state.camisetas;
+  const lookupCam = (id) => cams.find(c => c.id === id);
+  // Single-select category filter — tap a chip to focus that bucket, tap again
+  // (or 'todos') to clear. Default = show everything.
+  const CATS = [
+    { id: 'cierres',    label: 'cierres',   match: (e) => e.tipo.startsWith('sesion_') },
+    { id: 'camisetas',  label: 'camisetas', match: (e) => e.tipo.startsWith('camiseta_') },
+    { id: 'misiones',   label: 'misiones',  match: (e) => e.tipo.startsWith('mision_') },
+    { id: 'milestones', label: 'hitos',     match: (e) => e.tipo.startsWith('milestone_') },
+  ];
+  const [filter, setFilter] = useState(null);
+
+  const allEvents = [...(state.eventos || [])].reverse();
+  if (allEvents.length === 0) return <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Aún no hay nada que contar. La historia empieza con la primera misión.</p>;
+
+  const filtered = filter
+    ? allEvents.filter(e => {
+        const cat = CATS.find(c => c.match(e));
+        return cat && cat.id === filter;
+      })
+    : allEvents;
+
   const grupos = {};
-  eventos.forEach(e => {
+  filtered.forEach(e => {
     const key = new Date(e.ts).toDateString();
     if (!grupos[key]) grupos[key] = [];
     grupos[key].push(e);
   });
-  const camName = (id) => state.camisetas.find(c => c.id === id);
   const today = new Date().toDateString();
   const yesterday = new Date(Date.now() - DAY).toDateString();
-  return (<div className="space-y-6">
-    {Object.entries(grupos).map(([day, evs]) => {
-      const date = new Date(evs[0].ts);
-      let label;
-      if (day === today) label = 'hoy';
-      else if (day === yesterday) label = 'ayer';
-      else label = date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' });
-      return (<div key={day}>
-        <div className="ff-mono text-xs mb-2" style={{ color: 'var(--ink-faint)' }}>{label}</div>
-        <div className="space-y-1.5 pl-1" style={{ borderLeft: '1px solid var(--line-soft)' }}>
-          {evs.map(e => <EventoItem key={e.id} e={e} cam={e.cam_id ? camName(e.cam_id) : null} />)}
-        </div>
-      </div>);
-    })}
+  return (<div>
+    <div className="flex flex-wrap gap-1.5 mb-5">
+      <button onClick={() => setFilter(null)}
+        className="ring-ink ff-mono text-xs py-1 px-2"
+        style={{
+          background: filter === null ? 'var(--ink)' : 'transparent',
+          color: filter === null ? 'var(--bg)' : 'var(--ink-faint)',
+          border: '1px solid ' + (filter === null ? 'var(--ink)' : 'var(--line)'),
+        }}>todos</button>
+      {CATS.map(c => (
+        <button key={c.id} onClick={() => setFilter(filter === c.id ? null : c.id)}
+          className="ring-ink ff-mono text-xs py-1 px-2"
+          style={{
+            background: filter === c.id ? 'var(--ink)' : 'transparent',
+            color: filter === c.id ? 'var(--bg)' : 'var(--ink-faint)',
+            border: '1px solid ' + (filter === c.id ? 'var(--ink)' : 'var(--line)'),
+          }}>{c.label}</button>
+      ))}
+    </div>
+    {filtered.length === 0 ? (
+      <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Nada en esta categoría todavía.</p>
+    ) : (
+      <div className="space-y-6">
+        {Object.entries(grupos).map(([day, evs]) => {
+          const date = new Date(evs[0].ts);
+          let label;
+          if (day === today) label = 'hoy';
+          else if (day === yesterday) label = 'ayer';
+          else label = date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' });
+          return (<div key={day}>
+            <div className="ff-mono text-xs mb-2" style={{ color: 'var(--ink-faint)' }}>{label}</div>
+            <div className="space-y-1.5 pl-1" style={{ borderLeft: '1px solid var(--line-soft)' }}>
+              {evs.map(e => <EventoItem key={e.id} e={e} cam={e.cam_id ? lookupCam(e.cam_id) : null} lookupCam={lookupCam} />)}
+            </div>
+          </div>);
+        })}
+      </div>
+    )}
   </div>);
 }
 
-function EventoItem({ e, cam }) {
+function EventoItem({ e, cam, lookupCam }) {
+  const [expanded, setExpanded] = useState(false);
   const hora = new Date(e.ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
   let glyph, color, text;
   switch (e.tipo) {
@@ -1794,6 +1906,9 @@ function EventoItem({ e, cam }) {
     case 'camiseta_comprada':
       glyph = '◇'; color = 'var(--gold)';
       text = <>te pones <strong>{e.emoji} {e.nombre}</strong>{e.precio > 0 && <span className="ff-mono text-xs ml-2" style={{ color: 'var(--gold)' }}>−{e.precio} pts</span>}</>; break;
+    case 'camiseta_recibida':
+      glyph = '◇'; color = 'var(--ocean)';
+      text = <>recibes <strong>{e.emoji} {e.nombre}</strong>{e.creador && e.creador !== 'desconocido' && <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>de @{e.creador}</span>}</>; break;
     case 'camiseta_retirada':
       glyph = '◇'; color = 'var(--ink-faint)';
       text = <>se retira <em>{e.nombre}</em></>; break;
@@ -1824,27 +1939,76 @@ function EventoItem({ e, cam }) {
     case 'milestone_cobrado':
       glyph = '🎁'; color = 'var(--gold)';
       text = <><strong>cobrado</strong> · <em>{e.regalo}</em></>; break;
+    case 'milestone_editado':
+      glyph = '~'; color = 'var(--ink-faint)';
+      text = <>milestone editado · <em>{e.nombre}</em></>; break;
     case 'sesion_diaria':
       glyph = '☾'; color = 'var(--ocean)';
-      text = <><strong>cierre del día</strong>{e.notas && e.notas !== '·' && <span className="italic ml-1" style={{ color: 'var(--ink-soft)' }}>— "{e.notas}"</span>}</>; break;
+      text = <strong>cierre del día</strong>; break;
     case 'sesion_semanal':
       glyph = '☾'; color = 'var(--ocean)';
-      text = <><strong>cierre de semana</strong>{e.notas && <span className="italic ml-1" style={{ color: 'var(--ink-soft)' }}>— "{e.notas}"</span>}</>; break;
+      text = <strong>cierre de semana</strong>; break;
     case 'sesion_mensual':
       glyph = '☾'; color = 'var(--accent)';
-      text = <><strong>observador del observador</strong>{e.notas && <span className="italic ml-1" style={{ color: 'var(--ink-soft)' }}>— "{e.notas}"</span>}</>; break;
+      text = <strong>observador del observador</strong>; break;
     default:
       glyph = '·'; color = 'var(--ink-faint)'; text = e.tipo;
   }
-  return (<div className="flex items-start gap-2 ff-serif text-sm pl-3 -ml-px" style={{ borderLeft: '2px solid ' + color }}>
-    <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{hora}</span>
-    <span className="ff-mono text-xs" style={{ color }}>{glyph}</span>
-    <span className="flex-1" style={{ color: 'var(--ink-soft)' }}>{text}</span>
+
+  const isCierre = e.tipo.startsWith('sesion_');
+  const hasContent = e.notas && e.notas !== '·' || e.caliente || e.fria;
+  const expandable = isCierre && hasContent;
+  const caliente = e.caliente ? lookupCam(e.caliente) : null;
+  const fria = e.fria ? lookupCam(e.fria) : null;
+  // Truncated single-line preview for collapsed cierre rows — gives the
+  // reader something to scan without forcing a tap on every entry.
+  const notasPreview = e.notas && e.notas !== '·'
+    ? (e.notas.length > 60 ? e.notas.slice(0, 60).trimEnd() + '…' : e.notas)
+    : null;
+
+  return (<div>
+    <div className="flex items-start gap-2 ff-serif text-sm pl-3 -ml-px" style={{ borderLeft: '2px solid ' + color }}>
+      <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{hora}</span>
+      <span className="ff-mono text-xs" style={{ color }}>{glyph}</span>
+      {expandable ? (
+        <button onClick={() => setExpanded(!expanded)}
+          className="flex-1 text-left ring-ink"
+          style={{ color: 'var(--ink-soft)' }}>
+          {text}
+          {!expanded && notasPreview && (
+            <span className="italic ml-1" style={{ color: 'var(--ink-soft)' }}>— "{notasPreview}"</span>
+          )}
+          <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>{expanded ? '▾' : '▸'}</span>
+        </button>
+      ) : (
+        <span className="flex-1" style={{ color: 'var(--ink-soft)' }}>{text}</span>
+      )}
+    </div>
+    {expandable && expanded && (
+      <div className="ml-8 mt-1 mb-2 p-3 fade-up" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)' }}>
+        {e.notas && e.notas !== '·' && (
+          <p className="ff-serif italic text-sm mb-2 whitespace-pre-wrap" style={{ color: 'var(--ink)' }}>"{e.notas}"</p>
+        )}
+        {caliente && (
+          <div className="ff-mono text-xs flex items-center gap-2 mt-1" style={{ color: 'var(--ink-faint)' }}>
+            <Flame size={12} strokeWidth={1.5} style={{ color: 'var(--accent)' }} />
+            <span>caliente · {caliente.emoji} {caliente.nombre}</span>
+          </div>
+        )}
+        {fria && (
+          <div className="ff-mono text-xs flex items-center gap-2 mt-1" style={{ color: 'var(--ink-faint)' }}>
+            <Snowflake size={12} strokeWidth={1.5} style={{ color: 'var(--ocean)' }} />
+            <span>fría · {fria.emoji} {fria.nombre}</span>
+          </div>
+        )}
+      </div>
+    )}
   </div>);
 }
 
-function SesionDiaria({ cams, onToggle, onClose }) {
+function SesionDiaria({ cams, onToggle, onArchive, onClose }) {
   const [notas, setNotas] = useState('');
+  const [confirmArchive, setConfirmArchive] = useState(null);
   const today = new Date().toDateString();
   const activas = cams.flatMap(c => c.misiones.filter(m => estadoDeMision(m) === 'activa').map(m => ({ ...m, cam: c })));
   const hechasHoy = cams.flatMap(c => c.misiones.filter(m => {
@@ -1876,13 +2040,31 @@ function SesionDiaria({ cams, onToggle, onClose }) {
       <div className="smallcaps mb-3" style={{ color: 'var(--ink-faint)' }}>vivas</div>
       <div className="space-y-1 mb-8">
         {activas.map(m => (
-          <button key={m.id} onClick={() => onToggle(m.cam.id, m.id)} className="flex items-start gap-3 py-2 text-left w-full ring-ink">
-            <span className="w-4 h-4 mt-1.5 rounded-sm border check-ani" style={{ borderColor: 'var(--line)' }} />
-            <span className="flex-1 ff-serif">
-              <span className="text-base mr-2">{m.cam.emoji}</span>{m.nombre}
-            </span>
-            <span className="ff-mono text-xs mt-1.5" style={{ color: 'var(--gold)' }}>+{puntos(m)}</span>
-          </button>
+          <div key={m.id} className="flex items-start gap-2 py-1" style={{ borderBottom: '1px solid var(--line-soft)' }}>
+            <button onClick={() => onToggle(m.cam.id, m.id)} className="flex items-start gap-3 py-1 text-left flex-1 ring-ink">
+              <span className="w-4 h-4 mt-1.5 rounded-sm border check-ani" style={{ borderColor: 'var(--line)' }} />
+              <span className="flex-1 ff-serif">
+                <span className="text-base mr-2">{m.cam.emoji}</span>{m.nombre}
+              </span>
+              <span className="ff-mono text-xs mt-1.5" style={{ color: 'var(--gold)' }}>+{puntos(m)}</span>
+            </button>
+            {confirmArchive === m.id ? (
+              <div className="flex items-center gap-1 fade-up">
+                <button onClick={() => { onArchive(m.cam.id, m.id); setConfirmArchive(null); }}
+                  className="ring-ink ff-mono text-xs py-1 px-2"
+                  style={{ background: 'var(--accent)', color: 'var(--bg)' }}>archivar</button>
+                <button onClick={() => setConfirmArchive(null)}
+                  className="ring-ink ff-mono text-xs py-1 px-2"
+                  style={{ color: 'var(--ink-faint)' }}>no</button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmArchive(m.id)}
+                className="ring-ink p-1.5 mt-0.5"
+                style={{ color: 'var(--ink-faint)' }} aria-label="Archivar misión">
+                <Trash2 size={14} strokeWidth={1.5} />
+              </button>
+            )}
+          </div>
         ))}
       </div>
     </>)}
