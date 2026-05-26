@@ -1543,25 +1543,25 @@ function MisionRowDetail({ m, onToggle, onArchive, onEdit }) {
   const tonosStr = m.tonos?.map(t => TONOS.find(x => x.id === t)?.label).filter(Boolean).join(' · ');
   const mes = m.forma === 'recurrente' ? completionsEsteMes(m) : 0;
   return (<div className="flex items-start gap-2 py-1 group">
-    <button onClick={onToggle} className="flex-shrink-0 mt-1.5 ring-ink">
-      <span className="w-4 h-4 rounded-sm flex items-center justify-center check-ani block" style={{
+    <button onClick={onToggle} className="flex items-start gap-2 flex-1 text-left ring-ink py-0.5">
+      <span className="flex-shrink-0 mt-1.5 w-4 h-4 rounded-sm flex items-center justify-center check-ani block" style={{
         border: '1px solid ' + (showCheck ? 'var(--moss)' : 'var(--line)'),
         background: showCheck ? 'var(--moss)' : 'transparent',
       }}>{showCheck && <Check size={11} strokeWidth={3} color="var(--bg)" />}</span>
+      <span className="flex-1 ff-serif" style={{
+        color: hecha ? 'var(--ink-faint)' : 'var(--ink)',
+        textDecoration: hecha ? 'line-through' : 'none',
+      }}>{m.nombre}
+        <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>{formaGlyph}{tonosStr && ' · ' + tonosStr}</span>
+        {hoy > 0 && (
+          <span className="ff-mono text-xs ml-1" style={{ color: 'var(--gold)' }}>· {hoy}× hoy</span>
+        )}
+        {mes > 0 && (
+          <span className="ff-mono text-xs ml-1" style={{ color: 'var(--ink-faint)' }}>· {mes}×/30d</span>
+        )}
+      </span>
+      <span className="ff-mono text-xs mt-1.5" style={{ color: mult > 1.4 ? 'var(--warm)' : mult < 0.9 ? 'var(--ink-faint)' : 'var(--gold)' }}>+{p}</span>
     </button>
-    <span className="flex-1 ff-serif" style={{
-      color: hecha ? 'var(--ink-faint)' : 'var(--ink)',
-      textDecoration: hecha ? 'line-through' : 'none',
-    }}>{m.nombre}
-      <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>{formaGlyph}{tonosStr && ' · ' + tonosStr}</span>
-      {hoy > 0 && (
-        <span className="ff-mono text-xs ml-1" style={{ color: 'var(--gold)' }}>· {hoy}× hoy</span>
-      )}
-      {mes > 0 && (
-        <span className="ff-mono text-xs ml-1" style={{ color: 'var(--ink-faint)' }}>· {mes}×/30d</span>
-      )}
-    </span>
-    <span className="ff-mono text-xs mt-1.5" style={{ color: mult > 1.4 ? 'var(--warm)' : mult < 0.9 ? 'var(--ink-faint)' : 'var(--gold)' }}>+{p}</span>
     <button onClick={onEdit} className="opacity-40 group-hover:opacity-100 ring-ink p-1 transition-opacity">
       <Edit2 size={12} style={{ color: 'var(--ink-faint)' }} />
     </button>
@@ -1583,7 +1583,7 @@ function MisionForm({ initial, onSave, onCancel }) {
     <div className="smallcaps mb-2" style={{ color: 'var(--ink-faint)' }}>forma</div>
     <div className="flex flex-wrap gap-1 mb-3">
       {FORMAS.map(f => (
-        <button key={f.id} onClick={() => { setForma(f.id); if (!initial) setPuntosBase(f.puntosBase); }} className="ff-mono text-xs px-2 py-1 ring-ink" style={{
+        <button key={f.id} onClick={() => { setForma(f.id); setPuntosBase(f.puntosBase); }} className="ff-mono text-xs px-2 py-1 ring-ink" style={{
           background: forma === f.id ? 'var(--ink)' : 'transparent',
           color: forma === f.id ? 'var(--bg)' : 'var(--ink-soft)',
           border: '1px solid ' + (forma === f.id ? 'var(--ink)' : 'var(--line)'),
