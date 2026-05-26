@@ -471,6 +471,22 @@ export default function App() {
     Object.assign(ms, data);
     pushEv(s, { tipo: 'milestone_editado', cam_id: camId, ms_id: msId, nombre: ms.nombre });
   });
+  // Restar una completion de una misión recurrente. Pensado para deshacer
+  // un tap accidental. Saca la última completion y elimina el último movimiento
+  // mision_completada asociado a esa misión (los movimientos viejos quedan
+  // intactos). Si no hay completions o la misión no es recurrente, no hace nada.
+  const undoUltimaCompletion = (camId, misId) => update(s => {
+    const c = s.camisetas.find(c => c.id === camId);
+    const m = c?.misiones.find(m => m.id === misId);
+    if (!m || m.forma !== 'recurrente' || !m.completions?.length) return;
+    m.completions.pop();
+    for (let i = s.movimientos.length - 1; i >= 0; i--) {
+      if (s.movimientos[i].mision_id === misId && s.movimientos[i].tipo === 'mision_completada') {
+        s.movimientos.splice(i, 1);
+        break;
+      }
+    }
+  });
   // Move a camiseta up/down in the persistent order. dir = -1 (up) | +1 (down).
   // We move within the full s.camisetas array so it works whether the camiseta
   // is active or archived; UI lists filter on top.
@@ -546,6 +562,7 @@ export default function App() {
       onAddMision={(m) => addMision(cam.id, m)}
       onEditMision={(id, d) => editMision(cam.id, id, d)}
       onToggle={(id) => toggleMision(cam.id, id)}
+      onUndo={(id) => undoUltimaCompletion(cam.id, id)}
       onArchive={(id) => archiveMision(cam.id, id)}
       onRevive={(id) => reviveMision(cam.id, id)}
       onAddMilestone={(m) => addMilestone(cam.id, m)}
@@ -569,7 +586,7 @@ export default function App() {
 
   return (<Frame><Header puntos={puntosUser} warn={state._saveError} />
     <main className="px-5 pb-32 pt-2 max-w-2xl mx-auto">
-      {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onOpen={setOpenCam} />}
+      {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
       {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion} />}
     </main>
@@ -924,7 +941,7 @@ function EditCamiseta({ cam, onSave, onCancel }) {
   </div>);
 }
 
-function HoyView({ cams, movimientos, onToggle, onOpen }) {
+function HoyView({ cams, movimientos, onToggle, onUndo, onOpen }) {
   const today = new Date();
   const todayStr = today.toDateString();
   let hechasHoy = 0;
@@ -946,7 +963,7 @@ function HoyView({ cams, movimientos, onToggle, onOpen }) {
       <p className="ff-serif italic text-lg mb-2" style={{ color: 'var(--ink-soft)' }}>Día limpio. Sin misiones puestas.</p>
       <p className="ff-serif text-sm" style={{ color: 'var(--ink-faint)' }}>Entra en una camiseta y siembra alguna.</p>
     </div>)}
-    {conActivas.map(cam => <CamisetaCardHoy key={cam.id} cam={cam} onToggle={onToggle} onOpen={onOpen} />)}
+    {conActivas.map(cam => <CamisetaCardHoy key={cam.id} cam={cam} onToggle={onToggle} onUndo={onUndo} onOpen={onOpen} />)}
     {sinActivas.length > 0 && (<>
       <div className="hr-deco my-8" />
       <div className="smallcaps mb-3" style={{ color: 'var(--ink-faint)' }}>sin misiones</div>
@@ -962,7 +979,7 @@ function HoyView({ cams, movimientos, onToggle, onOpen }) {
   </div>);
 }
 
-function CamisetaCardHoy({ cam, onToggle, onOpen }) {
+function CamisetaCardHoy({ cam, onToggle, onUndo, onOpen }) {
   const visibles = cam.misiones.filter(m => m.estado !== 'archivada');
   if (visibles.length === 0) return null;
   return (<div className="mb-8">
@@ -972,12 +989,12 @@ function CamisetaCardHoy({ cam, onToggle, onOpen }) {
       {cam.arco && <span className="ff-mono text-xs ml-1" style={{ color: 'var(--ink-faint)' }}>{cam.arco.de} → {cam.arco.a}</span>}
     </button>
     <div className="space-y-1 pl-1">
-      {visibles.map(m => <MisionRow key={m.id} m={m} onToggle={() => onToggle(cam.id, m.id)} />)}
+      {visibles.map(m => <MisionRow key={m.id} m={m} onToggle={() => onToggle(cam.id, m.id)} onUndo={() => onUndo(cam.id, m.id)} />)}
     </div>
   </div>);
 }
 
-function MisionRow({ m, onToggle }) {
+function MisionRow({ m, onToggle, onUndo }) {
   const est = estadoDeMision(m);
   // Non-recurrentes: 'hecha' es estado terminal con check verde + tachado.
   // Recurrentes con completion hoy: tick verde, nombre legible (sin tachar) —
@@ -990,20 +1007,28 @@ function MisionRow({ m, onToggle }) {
   const formaGlyph = FORMAS.find(f => f.id === m.forma)?.glyph;
   const p = puntos(m);
   const tonosStr = m.tonos?.map(t => TONOS.find(x => x.id === t)?.label).filter(Boolean).join(' · ');
-  return (<button onClick={onToggle} className="flex items-start gap-3 py-2 text-left w-full ring-ink check-ani group">
-    <span className="flex-shrink-0 mt-1.5 w-4 h-4 rounded-sm flex items-center justify-center check-ani" style={{
-      border: '1px solid ' + (showCheck ? 'var(--moss)' : 'var(--line)'),
-      background: showCheck ? 'var(--moss)' : 'transparent',
-    }}>{showCheck && <Check size={11} strokeWidth={3} color="var(--bg)" />}</span>
-    <span className="flex-1 ff-serif text-base" style={{
-      color: hecha ? 'var(--ink-faint)' : 'var(--ink)',
-      textDecoration: hecha ? 'line-through' : 'none', textDecorationThickness: '0.5px',
-    }}>{m.nombre}
-      <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>{formaGlyph}{tonosStr && ' · ' + tonosStr}</span>
-      {hoy > 0 && <span className="ff-mono text-xs ml-1" style={{ color: 'var(--gold)' }}>· {hoy}× hoy</span>}
-    </span>
-    <span className="ff-mono text-xs mt-1.5" style={{ color: mult > 1.4 ? 'var(--warm)' : mult < 0.9 ? 'var(--ink-faint)' : 'var(--gold)' }}>+{p}</span>
-  </button>);
+  return (<div className="flex items-start gap-1 group">
+    <button onClick={onToggle} className="flex items-start gap-3 py-2 text-left flex-1 ring-ink check-ani">
+      <span className="flex-shrink-0 mt-1.5 w-4 h-4 rounded-sm flex items-center justify-center check-ani" style={{
+        border: '1px solid ' + (showCheck ? 'var(--moss)' : 'var(--line)'),
+        background: showCheck ? 'var(--moss)' : 'transparent',
+      }}>{showCheck && <Check size={11} strokeWidth={3} color="var(--bg)" />}</span>
+      <span className="flex-1 ff-serif text-base" style={{
+        color: hecha ? 'var(--ink-faint)' : 'var(--ink)',
+        textDecoration: hecha ? 'line-through' : 'none', textDecorationThickness: '0.5px',
+      }}>{m.nombre}
+        <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>{formaGlyph}{tonosStr && ' · ' + tonosStr}</span>
+        {hoy > 0 && <span className="ff-mono text-xs ml-1" style={{ color: 'var(--gold)' }}>· {hoy}× hoy</span>}
+      </span>
+      <span className="ff-mono text-xs mt-1.5" style={{ color: mult > 1.4 ? 'var(--warm)' : mult < 0.9 ? 'var(--ink-faint)' : 'var(--gold)' }}>+{p}</span>
+    </button>
+    {tickHoy && onUndo && (
+      <button onClick={onUndo} className="ring-ink p-2 self-center opacity-50"
+        aria-label="Restar una completion de hoy">
+        <Minus size={14} style={{ color: 'var(--ink-faint)' }} />
+      </button>
+    )}
+  </div>);
 }
 
 function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, onImport, onReorder }) {
@@ -1073,7 +1098,7 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
   </div>);
 }
 
-function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onArchive, onRevive, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam }) {
+function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUndo, onArchive, onRevive, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam }) {
   const [adding, setAdding] = useState(false);
   const [addingMs, setAddingMs] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -1132,7 +1157,7 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onAr
       {activas.map(m => editing === m.id ? (
         <MisionForm key={m.id} initial={m} onSave={(d) => { onEditMision(m.id, d); setEditing(null); }} onCancel={() => setEditing(null)} />
       ) : (
-        <MisionRowDetail key={m.id} m={m} onToggle={() => onToggle(m.id)} onArchive={() => onArchive(m.id)} onEdit={() => setEditing(m.id)} />
+        <MisionRowDetail key={m.id} m={m} onToggle={() => onToggle(m.id)} onUndo={() => onUndo(m.id)} onArchive={() => onArchive(m.id)} onEdit={() => setEditing(m.id)} />
       ))}
     </div>
     {hechas.length > 0 && (<>
@@ -1531,7 +1556,7 @@ function ImportSheet({ onClose, onImport }) {
   </div>);
 }
 
-function MisionRowDetail({ m, onToggle, onArchive, onEdit }) {
+function MisionRowDetail({ m, onToggle, onUndo, onArchive, onEdit }) {
   const est = estadoDeMision(m);
   const hecha = m.forma !== 'recurrente' && (est === 'hecha' || est === 'hecha-hoy');
   const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
@@ -1565,6 +1590,12 @@ function MisionRowDetail({ m, onToggle, onArchive, onEdit }) {
     <button onClick={onEdit} className="opacity-40 group-hover:opacity-100 ring-ink p-1 transition-opacity">
       <Edit2 size={12} style={{ color: 'var(--ink-faint)' }} />
     </button>
+    {tickHoy && onUndo && (
+      <button onClick={onUndo} className="opacity-40 group-hover:opacity-100 ring-ink p-1 transition-opacity"
+        aria-label="Restar una completion de hoy">
+        <Minus size={12} style={{ color: 'var(--ink-faint)' }} />
+      </button>
+    )}
     <button onClick={onArchive} className="opacity-40 group-hover:opacity-100 ring-ink p-1 transition-opacity">
       <Archive size={12} style={{ color: 'var(--ink-faint)' }} />
     </button>
