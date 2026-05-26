@@ -1944,13 +1944,13 @@ function EventoItem({ e, cam, lookupCam }) {
       text = <>milestone editado · <em>{e.nombre}</em></>; break;
     case 'sesion_diaria':
       glyph = '☾'; color = 'var(--ocean)';
-      text = <><strong>cierre del día</strong>{e.notas && e.notas !== '·' && <span className="italic ml-1" style={{ color: 'var(--ink-soft)' }}>— "{e.notas}"</span>}</>; break;
+      text = <strong>cierre del día</strong>; break;
     case 'sesion_semanal':
       glyph = '☾'; color = 'var(--ocean)';
-      text = <><strong>cierre de semana</strong>{e.notas && <span className="italic ml-1" style={{ color: 'var(--ink-soft)' }}>— "{e.notas}"</span>}</>; break;
+      text = <strong>cierre de semana</strong>; break;
     case 'sesion_mensual':
       glyph = '☾'; color = 'var(--accent)';
-      text = <><strong>observador del observador</strong>{e.notas && <span className="italic ml-1" style={{ color: 'var(--ink-soft)' }}>— "{e.notas}"</span>}</>; break;
+      text = <strong>observador del observador</strong>; break;
     default:
       glyph = '·'; color = 'var(--ink-faint)'; text = e.tipo;
   }
@@ -1960,6 +1960,11 @@ function EventoItem({ e, cam, lookupCam }) {
   const expandable = isCierre && hasContent;
   const caliente = e.caliente ? lookupCam(e.caliente) : null;
   const fria = e.fria ? lookupCam(e.fria) : null;
+  // Truncated single-line preview for collapsed cierre rows — gives the
+  // reader something to scan without forcing a tap on every entry.
+  const notasPreview = e.notas && e.notas !== '·'
+    ? (e.notas.length > 60 ? e.notas.slice(0, 60).trimEnd() + '…' : e.notas)
+    : null;
 
   return (<div>
     <div className="flex items-start gap-2 ff-serif text-sm pl-3 -ml-px" style={{ borderLeft: '2px solid ' + color }}>
@@ -1970,6 +1975,9 @@ function EventoItem({ e, cam, lookupCam }) {
           className="flex-1 text-left ring-ink"
           style={{ color: 'var(--ink-soft)' }}>
           {text}
+          {!expanded && notasPreview && (
+            <span className="italic ml-1" style={{ color: 'var(--ink-soft)' }}>— "{notasPreview}"</span>
+          )}
           <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>{expanded ? '▾' : '▸'}</span>
         </button>
       ) : (
