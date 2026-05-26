@@ -6,7 +6,7 @@ const STATE_KEY = 'juego-camisetas:state:v1';
 const DAY = 86400000;
 
 const emptyState = {
-  user_id: 'local', version: 4, created_at: new Date().toISOString(),
+  user_id: 'local', version: 5, created_at: new Date().toISOString(),
   camisetas: [], sesiones: [], eventos: [], movimientos: [],
 };
 
@@ -96,7 +96,17 @@ function migrate(s) {
       });
     });
   }
-  s.version = 4;
+  // v5: corrige eventos de cierre cuyo tipo quedó como 'diaria'/'semanal'/
+  // 'mensual' debido al bug del spread en logSesion. Renombra a 'sesion_*'
+  // para que el EventoItem switch, el filtro y el acordeón los reconozcan.
+  if (s.version < 5) {
+    s.eventos?.forEach(e => {
+      if (e.tipo === 'diaria' || e.tipo === 'semanal' || e.tipo === 'mensual') {
+        e.tipo = `sesion_${e.tipo}`;
+      }
+    });
+  }
+  s.version = 5;
   return s;
 }
 
@@ -455,7 +465,12 @@ export default function App() {
   const logSesion = (data) => update(s => {
     const id = uid();
     s.sesiones.push({ id, date: nowISO(), ...data });
-    pushEv(s, { tipo: `sesion_${data.tipo}`, sesion_id: id, notas: data.notas, ...data });
+    // Note: ...data goes FIRST so the explicit fields below (especially tipo)
+    // win over data.tipo ('diaria'/'semanal'/'mensual'). Putting the spread
+    // last was the original bug — it left e.tipo as 'diaria' instead of
+    // 'sesion_diaria', breaking the EventoItem switch + cierres filter +
+    // accordion. The v5 migration fixes legacy events on load.
+    pushEv(s, { ...data, tipo: `sesion_${data.tipo}`, sesion_id: id, notas: data.notas });
   });
 
   if (!state) return <Loading />;
