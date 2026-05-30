@@ -127,8 +127,8 @@ for (const { name, cam } of fixtures) {
   console.log(`── ${name} ──`);
 
   // MOLDE round-trip
-  const moldeBytes = encodeMoldePayload(cam);
-  console.log(`  MOLDE: ${moldeBytes.length}B`);
+  const moldeBytes = await encodeMoldePayload(cam);
+  console.log(`  MOLDE: ${moldeBytes.length}B (deflated)`);
   // cells round-trip (covers the cells path even though it's identity in JS)
   const moldeCells = bytesToCells(moldeBytes);
   const moldeBytesRT = cellsToBytes([...moldeCells, ...Array((4 - moldeCells.length % 4) % 4).fill(0)]).slice(0, moldeBytes.length);
