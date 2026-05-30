@@ -1,6 +1,24 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter } from 'lucide-react';
 import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta } from './codec/index.js';
+
+// Genera el SVG de preview del molde de forma asíncrona (el molde ahora va
+// comprimido con deflate, igual que el export → lo que ves es lo que mandas).
+function usePreviewSrc(cam) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    generateCamisetaSVG(cam)
+      .then((raw) => {
+        const url = URL.createObjectURL(new Blob([raw], { type: 'image/svg+xml' }));
+        if (cancelled) { URL.revokeObjectURL(url); return; }
+        setSrc(url);
+      })
+      .catch((e) => { console.error('preview SVG failed:', e); if (!cancelled) setSrc(null); });
+    return () => { cancelled = true; };
+  }, [cam]);
+  return src;
+}
 
 const STATE_KEY = 'juego-camisetas:state:v1';
 const DAY = 86400000;
@@ -1289,16 +1307,7 @@ function ShareSheet({ cam, onClose }) {
   // <script> (no execution), so we don't need to trust strings the codec
   // interpolates into the SVG. The PNG export uses the same SVG via canvas,
   // so what you see is what you send.
-  const previewSrc = useMemo(() => {
-    try {
-      const raw = generateCamisetaSVG(cam);
-      const blob = new Blob([raw], { type: 'image/svg+xml' });
-      return URL.createObjectURL(blob);
-    } catch (e) {
-      console.error('preview SVG failed:', e);
-      return null;
-    }
-  }, [cam]);
+  const previewSrc = usePreviewSrc(cam);
 
   useEffect(() => () => { if (previewSrc) URL.revokeObjectURL(previewSrc); }, [previewSrc]);
 
@@ -1458,7 +1467,7 @@ function ImportSheet({ onClose, onImport }) {
       // Generate a preview SVG from the decoded data — this should match the
       // original sender's design closely (same seed: id + nombre).
       try {
-        const raw = generateCamisetaSVG(result.camiseta);
+        const raw = await generateCamisetaSVG(result.camiseta);
         const blob = new Blob([raw], { type: 'image/svg+xml' });
         setPreviewSrc(URL.createObjectURL(blob));
       } catch (_) { /* preview is best-effort */ }
