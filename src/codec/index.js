@@ -30,7 +30,8 @@ const RADII = [0, 1.6, 2.7, 4.0];
 // Thresholds for cell classification (calibrated for CELL=14, sample 7x7 center vs ±6 corners)
 const T01 = 15, T12 = 65, T23 = 160;
 
-const TONO_COLORS = {fisica:'#ef2929',emocional:'#ff6b35',creativa:'#ffd600',profunda:'#1976d2'};
+const TONO_COLORS = {fisica:'#ff00a8',emocional:'#00f0ff',creativa:'#f6ff00',profunda:'#8a00ff'};
+const MOTIF_COLORS = {fisica:'#ff003c',emocional:'#ff9e00',creativa:'#39ff14',profunda:'#7a04eb'};
 const TONO_ORDER = ['fisica','emocional','creativa','profunda'];
 const DEFAULT_BODY = '#bdb5a8';
 
@@ -279,12 +280,16 @@ async function inflateRaw(bytes) {
 // ============================================================
 // HIGH-LEVEL PAYLOAD ENCODE/DECODE WITH FRAMING
 // ============================================================
-// Framing: [0x44 0x4D][version:u8] + (for v5 only: [comp_len:u16-LE]) + bytes...
-function encodeMoldePayload(cam) {
+// Framing: [0x44 0x4D][version:u8] + (for compressed v5/v6: [comp_len:u16-LE]) + bytes...
+// v4 = molde sin comprimir (legacy, aún se decodifica). v6 = molde comprimido (deflate).
+async function encodeMoldePayload(cam) {
   const inner = encodeMoldeInner(cam);
-  const out = new Uint8Array(3 + inner.length);
-  out[0] = 0x44; out[1] = 0x4D; out[2] = 0x04;
-  out.set(inner, 3);
+  const compressed = await deflateRaw(inner);
+  const out = new Uint8Array(5 + compressed.length);
+  out[0] = 0x44; out[1] = 0x4D; out[2] = 0x06;
+  out[3] = compressed.length & 0xff;
+  out[4] = (compressed.length >>> 8) & 0xff;
+  out.set(compressed, 5);
   return out;
 }
 
@@ -312,6 +317,12 @@ async function routeDecode(bytes) {
     const compressed = bytes.slice(5, 5 + compLen);
     const decompressed = await inflateRaw(compressed);
     return { mode: 'snapshot', camiseta: decodeSnapshotInner(decompressed) };
+  }
+  if (v === 0x06) {
+    const compLen = bytes[3] | (bytes[4] << 8);
+    const compressed = bytes.slice(5, 5 + compLen);
+    const decompressed = await inflateRaw(compressed);
+    return { mode: 'molde', camiseta: decodeMoldeInner(decompressed) };
   }
   throw new Error(`Versión de camiseta desconocida: ${v}. Quizá necesites actualizar el app.`);
 }
@@ -364,7 +375,7 @@ function tshirtPath(cx,cy,scale,fd){
 }
 
 function shapeForMission(m,x,y,size,rand){
-  const fill=(m.tonos&&m.tonos[0])?TONO_COLORS[m.tonos[0]]:'#ff1493';
+  const fill=(m.tonos&&m.tonos[0])?MOTIF_COLORS[m.tonos[0]]:'#ff003c';
   const rot=Math.floor((rand()-0.5)*40);
   if(m.forma==='rapida')return `<g transform="rotate(${rot} ${x} ${y})"><circle cx="${x}" cy="${y}" r="${size}" fill="${fill}" stroke="#0a0a0a" stroke-width="4"/></g>`;
   if(m.forma==='unica'){const s=size*1.2,inner=s*0.32,pts=[];for(let i=0;i<8;i++){const a=(i/8)*Math.PI*2-Math.PI/2,r=(i%2===0)?s:inner;pts.push(`${x+Math.cos(a)*r},${y+Math.sin(a)*r}`);}return `<g transform="rotate(${rot} ${x} ${y})"><polygon points="${pts.join(' ')}" fill="${fill}" stroke="#0a0a0a" stroke-width="4"/></g>`;}
@@ -390,7 +401,7 @@ function placeShapes(misiones,bbox,rand){
 function starBig(cx,cy,size){
   const outer=size,inner=size*0.3,pts=[];
   for(let i=0;i<8;i++){const a=(i/8)*Math.PI*2-Math.PI/2,r=(i%2===0)?outer:inner;pts.push(`${cx+Math.cos(a)*r},${cy+Math.sin(a)*r}`);}
-  return `<g><polygon points="${pts.join(' ')}" fill="#ff1493" stroke="#0a0a0a" stroke-width="4"/><circle cx="${cx}" cy="${cy}" r="${inner*0.7}" fill="#ffd600" stroke="#0a0a0a" stroke-width="2"/></g>`;
+  return `<g><polygon points="${pts.join(' ')}" fill="#ff003c" stroke="#0a0a0a" stroke-width="4"/><circle cx="${cx}" cy="${cy}" r="${inner*0.7}" fill="#39ff14" stroke="#0a0a0a" stroke-width="2"/></g>`;
 }
 
 function placeBack(milestones,misiones,bbox,rand){
@@ -403,7 +414,7 @@ function placeBack(milestones,misiones,bbox,rand){
     o+=starBig(cx,cy,30);
   }
   const dc=Math.min(40,10+misiones.length*3);
-  const pal=['#00d4ff','#ff1493','#ffd600','#ef2929','#1976d2','#c8f062'];
+  const pal=['#ff003c','#ff9e00','#39ff14','#7a04eb','#00f0ff','#ff00a8'];
   for(let i=0;i<dc;i++){
     const x=bbox.left+bbox.w*(0.1+rand()*0.8),y=bbox.top+bbox.h*(0.1+rand()*0.8);
     const r=rand(),c=pal[Math.floor(rand()*pal.length)];
@@ -449,19 +460,19 @@ function generateSVG(cam, payloadCells, cellList) {
   }
 
   // Pastel bands (crossing freely — full width)
-  const bands=[{y:365,h:14,c:'#c6f4f9'},{y:430,h:18,c:'#ffc6d9'},{y:510,h:12,c:'#c6f4f9'},{y:600,h:16,c:'#ffc6d9'},{y:720,h:12,c:'#fff3a6'}];
+  const bands=[{y:365,h:10,c:'#f6ff00'},{y:412,h:6,c:'#00f0ff'},{y:430,h:14,c:'#ff003c'},{y:510,h:8,c:'#39ff14'},{y:600,h:12,c:'#ff00a8'},{y:660,h:5,c:'#00f0ff'},{y:720,h:10,c:'#f6ff00'}];
   let bandsSvg='';
   for(const b of bands){
-    bandsSvg+=`<polygon points="0,${b.y} 1000,${b.y-10} 1000,${b.y+b.h-10} 0,${b.y+b.h}" fill="${b.c}" opacity="0.85"/>`;
+    bandsSvg+=`<polygon points="0,${b.y} 1000,${b.y-10} 1000,${b.y+b.h-10} 0,${b.y+b.h}" fill="${b.c}" opacity="0.92"/>`;
   }
-  const greenBand=`<polygon points="0,195 1000,185 1000,221 0,231" fill="#c8f062" opacity="0.85"/>`;
+  const greenBand=`<polygon points="0,195 1000,185 1000,221 0,231" fill="#39ff14" opacity="0.95"/>`;
 
   // Title with RGB split
   const N=cam.nombre.toUpperCase();
   const ts=N.length<=8?110:N.length<=12?88:N.length<=16?70:58;
   const title=`<g font-family="Anton, Impact, sans-serif" font-size="${ts}" text-anchor="middle" letter-spacing="2" font-weight="900">
-    <text x="494" y="165" fill="#00d4ff">${N}</text>
-    <text x="506" y="165" fill="#ff1493">${N}</text>
+    <text x="490" y="165" fill="#00f0ff">${N}</text>
+    <text x="510" y="165" fill="#ff00a8">${N}</text>
     <text x="500" y="165" fill="#0a0a0a">${N}</text>
   </g>`;
 
@@ -474,9 +485,9 @@ function generateSVG(cam, payloadCells, cellList) {
   }
 
   const labels=`<g>
-    <rect x="235" y="295" width="56" height="20" fill="#f0e5d0" stroke="#0a0a0a" stroke-width="1.5"/>
+    <rect x="235" y="295" width="56" height="20" fill="#ece7d6" stroke="#0a0a0a" stroke-width="1.5"/>
     <text x="263" y="309" font-family="Space Mono, monospace" font-size="11" font-weight="700" text-anchor="middle" fill="#0a0a0a">FRONT</text>
-    <rect x="705" y="295" width="56" height="20" fill="#f0e5d0" stroke="#0a0a0a" stroke-width="1.5"/>
+    <rect x="705" y="295" width="56" height="20" fill="#ece7d6" stroke="#0a0a0a" stroke-width="1.5"/>
     <text x="733" y="309" font-family="Space Mono, monospace" font-size="11" font-weight="700" text-anchor="middle" fill="#0a0a0a">BACK</text>
   </g>`;
 
@@ -484,18 +495,18 @@ function generateSVG(cam, payloadCells, cellList) {
   const origen=cam.origen==='comprada'?'@DUMPA':'@PROPIA';
   const hash='#'+hashId(cam.id || cam.nombre || 'x');
   const ow=14+origen.length*11,hw=14+hash.length*10;
-  let footer=`<g transform="rotate(-3 ${100+ow/2} 934)"><rect x="100" y="920" width="${ow}" height="28" fill="#00d4ff" stroke="#0a0a0a" stroke-width="2"/><text x="${100+ow/2}" y="939" font-family="Space Mono, monospace" font-size="13" font-weight="700" text-anchor="middle" fill="#0a0a0a" letter-spacing="1">${origen}</text></g>
-  <g transform="rotate(2 ${420+hw/2} 934)"><rect x="420" y="920" width="${hw}" height="28" fill="#ff1493" stroke="#0a0a0a" stroke-width="2"/><text x="${420+hw/2}" y="939" font-family="Space Mono, monospace" font-size="13" font-weight="700" text-anchor="middle" fill="#0a0a0a" letter-spacing="1">${hash}</text></g>
+  let footer=`<g transform="rotate(-3 ${100+ow/2} 934)"><rect x="100" y="920" width="${ow}" height="28" fill="#00f0ff" stroke="#0a0a0a" stroke-width="2"/><text x="${100+ow/2}" y="939" font-family="Space Mono, monospace" font-size="13" font-weight="700" text-anchor="middle" fill="#0a0a0a" letter-spacing="1">${origen}</text></g>
+  <g transform="rotate(2 ${420+hw/2} 934)"><rect x="420" y="920" width="${hw}" height="28" fill="#ff00a8" stroke="#0a0a0a" stroke-width="2"/><text x="${420+hw/2}" y="939" font-family="Space Mono, monospace" font-size="13" font-weight="700" text-anchor="middle" fill="#0a0a0a" letter-spacing="1">${hash}</text></g>
   <text x="720" y="924" font-family="Space Mono, monospace" font-size="11" fill="#0a0a0a" letter-spacing="3">T O N O S</text>`;
   tonos.forEach((t,i)=>{
     const sx=720+i*32,sy=932,rot=(i%2===0?-6:6);
-    footer+=`<g transform="rotate(${rot} ${sx+12} ${sy+12})"><rect x="${sx}" y="${sy}" width="24" height="24" fill="${TONO_COLORS[t]}" stroke="#0a0a0a" stroke-width="2.5"/></g>`;
+    footer+=`<g transform="rotate(${rot} ${sx+12} ${sy+12})"><rect x="${sx}" y="${sy}" width="24" height="24" fill="${MOTIF_COLORS[t]}" stroke="#0a0a0a" stroke-width="2.5"/></g>`;
   });
 
   const fc=`cf-${cam.id || 'x'}`,bc=`cb-${cam.id || 'x'}`;
   return `<svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">
     <defs><clipPath id="${fc}"><path d="${fT.path}"/></clipPath><clipPath id="${bc}"><path d="${bT.path}"/></clipPath></defs>
-    <rect width="1000" height="1000" fill="#f0e5d0"/>
+    <rect width="1000" height="1000" fill="#ece7d6"/>
     ${bandsSvg}
     ${greenBand}
     ${halftone}
@@ -573,13 +584,13 @@ export async function encodeCamisetaToPng(camiseta, opts = {}) {
   const mode = opts.mode || 'molde';
   const payload = mode === 'snapshot'
     ? await encodeSnapshotPayload(camiseta)
-    : encodeMoldePayload(camiseta);
+    : await encodeMoldePayload(camiseta);
 
   const cellList = buildCellList();
   const cells = bytesToCells(payload);
   if (cells.length > cellList.length) {
     const maxBytes = Math.floor(cellList.length / 4);
-    throw new Error(`Payload demasiado grande: ${payload.length}B > capacidad ${maxBytes}B. Reducí contenido o usá modo 'snapshot' (comprime).`);
+    throw new Error(`Payload demasiado grande: ${payload.length}B (ya comprimido) > capacidad ${maxBytes}B. Reducí misiones/milestones o subí la capacidad de la grilla.`);
   }
 
   const svg = generateSVG(camiseta, cells, cellList);
@@ -621,15 +632,15 @@ export async function decodeImageToCamiseta(source) {
 
 /**
  * For app integration: convenience helper that produces the SVG string only,
- * useful if you want to render in React via dangerouslySetInnerHTML for preview
- * without going through canvas.
+ * useful if you want to render in React for preview without going through canvas.
+ * Async because the molde payload is now deflate-compressed (matches the export,
+ * so what you preview is exactly what you send).
  */
-export function generateCamisetaSVG(camiseta, opts = {}) {
+export async function generateCamisetaSVG(camiseta, opts = {}) {
   const mode = opts.mode || 'molde';
   const payload = mode === 'snapshot'
-    ? null  // snapshot needs async, would have to be awaited externally
-    : encodeMoldePayload(camiseta);
-  if (!payload) throw new Error('Use encodeCamisetaToPng for snapshot mode (async required).');
+    ? await encodeSnapshotPayload(camiseta)
+    : await encodeMoldePayload(camiseta);
   const cellList = buildCellList();
   const cells = bytesToCells(payload);
   return generateSVG(camiseta, cells, cellList);
