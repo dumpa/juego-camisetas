@@ -179,6 +179,40 @@ const CATALOGO = [
     ],
     milestones: [],
   },
+  {
+    id: 'mi-primera-camiseta-v1',
+    nombre: 'Mi primera camiseta',
+    emoji: '👕',
+    esencia: 'Aprender jugando: crear e invitar.',
+    arco: { de: 'espectador', a: 'creador' },
+    precio: 0,
+    creador_id: 'dumpa',
+    misiones: [
+      { nombre: 'Crea tu primera camiseta',              forma: 'dificil', tonos: ['creativa'],               puntos_base: 3 },
+      { nombre: 'Invita a alguien a crear la suya',      forma: 'dificil', tonos: ['emocional','estrategica'], puntos_base: 3 },
+    ],
+    milestones: [],
+  },
+  {
+    id: 'sueno-v1',
+    nombre: 'Sueño',
+    emoji: '🌙',
+    esencia: 'Consciente con el sueño.',
+    arco: { de: 'Acostarse', a: 'Descanso real' },
+    precio: 100,
+    creador_id: 'dumpa',
+    misiones: [
+      { nombre: 'Dejar el celular fuera del cuarto',     forma: 'recurrente', tonos: [],                       puntos_base: 2 },
+      { nombre: 'La cama solo para dormir',              forma: 'recurrente', tonos: [],                       puntos_base: 2 },
+      { nombre: 'Dejar pantallas una hora antes',        forma: 'recurrente', tonos: [],                       puntos_base: 2 },
+      { nombre: 'Definir horario de sueño',              forma: 'facil',      tonos: ['estrategica'],          puntos_base: 1 },
+      { nombre: 'No tomar café después de las 5pm',      forma: 'recurrente', tonos: ['fisica','estrategica'], puntos_base: 2 },
+      { nombre: 'Hacer los 10k pasos',                   forma: 'recurrente', tonos: ['fisica'],               puntos_base: 2 },
+    ],
+    milestones: [
+      { nombre: '8 horas de buen sueño', regalo: 'Gelato 🍧' },
+    ],
+  },
 ];
 
 function multiplicador(m) {
@@ -437,6 +471,14 @@ export default function App() {
     const m = s.camisetas.find(c => c.id === camId)?.misiones.find(m => m.id === misId);
     if (m) { m.estado = 'activa'; m.archived_at = null; m.completed_at = null; }
   });
+  const deleteMision = (camId, misId) => update(s => {
+    const c = s.camisetas.find(c => c.id === camId);
+    if (!c) return;
+    const m = c.misiones.find(m => m.id === misId);
+    c.misiones = c.misiones.filter(m => m.id !== misId);
+    // El ledger es historia: los puntos ya ganados se conservan; solo desaparece la misión.
+    if (m) pushEv(s, { tipo: 'mision_borrada', cam_id: camId, mision_id: misId, nombre: m.nombre });
+  });
   const ajustarDif = (camId, misId, d) => update(s => {
     const m = s.camisetas.find(c => c.id === camId)?.misiones.find(m => m.id === misId);
     if (m) m.puntos_base = Math.max(1, Math.min(10, (m.puntos_base || 1) + d));
@@ -565,6 +607,7 @@ export default function App() {
       onUndo={(id) => undoUltimaCompletion(cam.id, id)}
       onArchive={(id) => archiveMision(cam.id, id)}
       onRevive={(id) => reviveMision(cam.id, id)}
+      onDelete={(id) => { const mm = cam.misiones.find(x => x.id === id); if (window.confirm('¿Borrar "' + (mm ? mm.nombre : '') + '"? Se elimina del todo. Los puntos ya ganados se quedan.')) deleteMision(cam.id, id); }}
       onAddMilestone={(m) => addMilestone(cam.id, m)}
       onToggleMilestone={(id) => toggleMilestone(cam.id, id)}
       onCobrarMilestone={(id) => cobrarMilestone(cam.id, id)}
@@ -1114,7 +1157,7 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
   </div>);
 }
 
-function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUndo, onArchive, onRevive, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam }) {
+function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUndo, onArchive, onRevive, onDelete, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam }) {
   const [adding, setAdding] = useState(false);
   const [addingMs, setAddingMs] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -1173,7 +1216,7 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUn
       {activas.map(m => editing === m.id ? (
         <MisionForm key={m.id} initial={m} onSave={(d) => { onEditMision(m.id, d); setEditing(null); }} onCancel={() => setEditing(null)} />
       ) : (
-        <MisionRowDetail key={m.id} m={m} onToggle={() => onToggle(m.id)} onUndo={() => onUndo(m.id)} onArchive={() => onArchive(m.id)} onEdit={() => setEditing(m.id)} />
+        <MisionRowDetail key={m.id} m={m} onToggle={() => onToggle(m.id)} onUndo={() => onUndo(m.id)} onArchive={() => onArchive(m.id)} onDelete={() => onDelete(m.id)} onEdit={() => setEditing(m.id)} />
       ))}
     </div>
     {hechas.length > 0 && (<>
@@ -1182,7 +1225,7 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUn
         {hechas.map(m => editing === m.id ? (
           <MisionForm key={m.id} initial={m} onSave={(d) => { onEditMision(m.id, d); setEditing(null); }} onCancel={() => setEditing(null)} />
         ) : (
-          <MisionRowDetail key={m.id} m={m} onToggle={() => onToggle(m.id)} onArchive={() => onArchive(m.id)} onEdit={() => setEditing(m.id)} />
+          <MisionRowDetail key={m.id} m={m} onToggle={() => onToggle(m.id)} onArchive={() => onArchive(m.id)} onDelete={() => onDelete(m.id)} onEdit={() => setEditing(m.id)} />
         ))}
       </div>
     </>)}
@@ -1582,7 +1625,7 @@ function ImportSheet({ onClose, onImport }) {
   </div>);
 }
 
-function MisionRowDetail({ m, onToggle, onUndo, onArchive, onEdit }) {
+function MisionRowDetail({ m, onToggle, onUndo, onArchive, onDelete, onEdit }) {
   const est = estadoDeMision(m);
   const hecha = m.forma !== 'recurrente' && (est === 'hecha' || est === 'hecha-hoy');
   const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
@@ -1625,6 +1668,11 @@ function MisionRowDetail({ m, onToggle, onUndo, onArchive, onEdit }) {
     <button onClick={onArchive} className="opacity-40 group-hover:opacity-100 ring-ink p-1 transition-opacity">
       <Archive size={12} style={{ color: 'var(--ink-faint)' }} />
     </button>
+    {onDelete && (
+      <button onClick={onDelete} className="opacity-40 group-hover:opacity-100 ring-ink p-1 transition-opacity" aria-label="Borrar misión">
+        <Trash2 size={12} style={{ color: 'var(--accent)' }} />
+      </button>
+    )}
   </div>);
 }
 
