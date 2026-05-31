@@ -30,7 +30,9 @@ const RADII = [0, 1.6, 2.7, 4.0];
 // Thresholds for cell classification (calibrated for CELL=14, sample 7x7 center vs ±6 corners)
 const T01 = 15, T12 = 65, T23 = 160;
 
-const TONO_COLORS = {fisica:'#ef2929',emocional:'#ff6b35',creativa:'#ffd600',profunda:'#1976d2'};
+const TONO_COLORS = {fisica:'#DA1895',emocional:'#0DEDF7',creativa:'#F4FF01',profunda:'#8900FD'};
+// Paleta del motivo (glitch/punk), independiente de los tonos del cuerpo.
+const MOTIVO_COLORS = ['#FF9E01','#37FF14','#00F0FF','#7505ED','#F3144D','#F4FF01'];
 const TONO_ORDER = ['fisica','emocional','creativa','profunda'];
 const DEFAULT_BODY = '#bdb5a8';
 
@@ -364,7 +366,7 @@ function tshirtPath(cx,cy,scale,fd){
 }
 
 function shapeForMission(m,x,y,size,rand){
-  const fill=(m.tonos&&m.tonos[0])?TONO_COLORS[m.tonos[0]]:'#ff1493';
+  const fill=MOTIVO_COLORS[Math.floor(rand()*MOTIVO_COLORS.length)];
   const rot=Math.floor((rand()-0.5)*40);
   if(m.forma==='rapida')return `<g transform="rotate(${rot} ${x} ${y})"><circle cx="${x}" cy="${y}" r="${size}" fill="${fill}" stroke="#0a0a0a" stroke-width="4"/></g>`;
   if(m.forma==='unica'){const s=size*1.2,inner=s*0.32,pts=[];for(let i=0;i<8;i++){const a=(i/8)*Math.PI*2-Math.PI/2,r=(i%2===0)?s:inner;pts.push(`${x+Math.cos(a)*r},${y+Math.sin(a)*r}`);}return `<g transform="rotate(${rot} ${x} ${y})"><polygon points="${pts.join(' ')}" fill="${fill}" stroke="#0a0a0a" stroke-width="4"/></g>`;}
@@ -390,7 +392,7 @@ function placeShapes(misiones,bbox,rand){
 function starBig(cx,cy,size){
   const outer=size,inner=size*0.3,pts=[];
   for(let i=0;i<8;i++){const a=(i/8)*Math.PI*2-Math.PI/2,r=(i%2===0)?outer:inner;pts.push(`${cx+Math.cos(a)*r},${cy+Math.sin(a)*r}`);}
-  return `<g><polygon points="${pts.join(' ')}" fill="#ff1493" stroke="#0a0a0a" stroke-width="4"/><circle cx="${cx}" cy="${cy}" r="${inner*0.7}" fill="#ffd600" stroke="#0a0a0a" stroke-width="2"/></g>`;
+  return `<g><polygon points="${pts.join(' ')}" fill="#F3144D" stroke="#0a0a0a" stroke-width="4"/><circle cx="${cx}" cy="${cy}" r="${inner*0.7}" fill="#F4FF01" stroke="#0a0a0a" stroke-width="2"/></g>`;
 }
 
 function placeBack(milestones,misiones,bbox,rand){
@@ -403,7 +405,7 @@ function placeBack(milestones,misiones,bbox,rand){
     o+=starBig(cx,cy,30);
   }
   const dc=Math.min(40,10+misiones.length*3);
-  const pal=['#00d4ff','#ff1493','#ffd600','#ef2929','#1976d2','#c8f062'];
+  const pal=MOTIVO_COLORS;
   for(let i=0;i<dc;i++){
     const x=bbox.left+bbox.w*(0.1+rand()*0.8),y=bbox.top+bbox.h*(0.1+rand()*0.8);
     const r=rand(),c=pal[Math.floor(rand()*pal.length)];
@@ -449,12 +451,12 @@ function generateSVG(cam, payloadCells, cellList) {
   }
 
   // Pastel bands (crossing freely — full width)
-  const bands=[{y:365,h:14,c:'#c6f4f9'},{y:430,h:18,c:'#ffc6d9'},{y:510,h:12,c:'#c6f4f9'},{y:600,h:16,c:'#ffc6d9'},{y:720,h:12,c:'#fff3a6'}];
+  const bands=[{y:365,h:14,c:'#00F0FF'},{y:430,h:18,c:'#DA1895'},{y:510,h:12,c:'#F4FF01'},{y:600,h:16,c:'#00F0FF'},{y:720,h:12,c:'#DA1895'}];
   let bandsSvg='';
   for(const b of bands){
-    bandsSvg+=`<polygon points="0,${b.y} 1000,${b.y-10} 1000,${b.y+b.h-10} 0,${b.y+b.h}" fill="${b.c}" opacity="0.85"/>`;
+    bandsSvg+=`<polygon points="0,${b.y} 1000,${b.y-10} 1000,${b.y+b.h-10} 0,${b.y+b.h}" fill="${b.c}" opacity="0.7"/>`;
   }
-  const greenBand=`<polygon points="0,195 1000,185 1000,221 0,231" fill="#c8f062" opacity="0.85"/>`;
+  const greenBand=`<polygon points="0,195 1000,185 1000,221 0,231" fill="#41FF19" opacity="0.8"/>`;
 
   // Title with RGB split
   const N=cam.nombre.toUpperCase();
