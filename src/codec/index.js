@@ -280,16 +280,41 @@ async function inflateRaw(bytes) {
 // ============================================================
 // HIGH-LEVEL PAYLOAD ENCODE/DECODE WITH FRAMING
 // ============================================================
-// Framing: [0x44 0x4D][version:u8] + (for compressed v5/v6: [comp_len:u16-LE]) + bytes...
-// v4 = molde sin comprimir (legacy, aún se decodifica). v6 = molde comprimido (deflate).
+// ============================================================
+// REED-SOLOMON GF(256), poly 0x11d (fuzz-verified 2000/2000).
+// Protege el molde comprimido para que el JPEG de WhatsApp no lo rompa.
+// El arte (puntos 2-bit, dos lados) NO cambia: solo cambian los bytes.
+// ============================================================
+const RS_EXP = new Uint8Array(512), RS_LOG = new Uint8Array(256);
+{ let x = 1; for (let i = 0; i < 255; i++) { RS_EXP[i] = x; RS_LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; } for (let i = 255; i < 512; i++) RS_EXP[i] = RS_EXP[i - 255]; }
+const rsMul = (a, b) => (a === 0 || b === 0) ? 0 : RS_EXP[RS_LOG[a] + RS_LOG[b]];
+const rsPolymul = (p, q) => { const r = new Array(p.length + q.length - 1).fill(0); for (let j = 0; j < q.length; j++) for (let i = 0; i < p.length; i++) r[i + j] ^= rsMul(p[i], q[j]); return r; };
+const rsPolyeval = (p, x) => { let y = p[0]; for (let i = 1; i < p.length; i++) y = rsMul(y, x) ^ p[i]; return y; };
+function rsGenpoly(n) { let g = [1]; for (let i = 0; i < n; i++) g = rsPolymul(g, [1, RS_EXP[i]]); return g; }
+function rsEncodeOne(msg, nsym) { const gen = rsGenpoly(nsym); const out = msg.concat(new Array(nsym).fill(0)); for (let i = 0; i < msg.length; i++) { const c = out[i]; if (c !== 0) for (let j = 0; j < gen.length; j++) out[i + j] ^= rsMul(gen[j], c); } return msg.concat(out.slice(msg.length)); }
+function rsSynd(m, n) { const s = [0]; for (let i = 0; i < n; i++) s.push(rsPolyeval(m, RS_EXP[i])); return s; }
+function rsErrLoc(s, n) { let e = [1], o = [1]; for (let i = 0; i < n; i++) { o.push(0); let d = s[i + 1]; for (let j = 1; j < e.length; j++) d ^= rsMul(e[e.length - 1 - j], s[i + 1 - j]); if (d !== 0) { if (o.length > e.length) { let nl = o.map(x => rsMul(x, d)); o = e.map(x => rsMul(x, RS_EXP[(255 - RS_LOG[d]) % 255])); e = nl; } for (let j = 0; j < o.length; j++) e[e.length - 1 - j] ^= rsMul(o[o.length - 1 - j], d); } } return e; }
+function rsErrPos(e, nm) { const er = e.length - 1, p = []; for (let i = 0; i < nm; i++) if (rsPolyeval(e, RS_EXP[(255 - i) % 255]) === 0) p.push(nm - 1 - i); return p.length === er ? p : null; }
+function rsCorrectErrata(msg, synd, pos) { const cp = pos.map(p => msg.length - 1 - p); let eloc = [1]; for (const i of cp) eloc = rsPolymul(eloc, [RS_EXP[i], 1]); const sr = synd.slice(1).reverse(); let ev = rsPolymul(sr, eloc); ev = ev.slice(ev.length - pos.length); const out = msg.slice(); for (let k = 0; k < cp.length; k++) { const Xi = RS_EXP[cp[k]], Xinv = RS_EXP[(255 - cp[k]) % 255]; const evx = rsPolyeval(ev, Xinv); let dp = 0; for (let i = 1; i < eloc.length; i += 2) dp ^= rsMul(eloc[eloc.length - 1 - i], RS_EXP[(RS_LOG[Xinv] * (i - 1)) % 255]); if (dp === 0) return null; out[pos[k]] ^= rsMul(Xi, rsMul(evx, RS_EXP[(255 - RS_LOG[dp]) % 255])); } return out; }
+function rsCorrectOne(msg, nsym) { const m = msg.slice(); const s = rsSynd(m, nsym); if (Math.max(...s) === 0) return m.slice(0, -nsym); const el = rsErrLoc(s, nsym); const p = rsErrPos(el, m.length); if (!p) return null; const c = rsCorrectErrata(m, s, p); if (!c) return null; if (Math.max(...rsSynd(c, nsym)) !== 0) return null; return c.slice(0, -nsym); }
+
+const RS_NSYM = 24; // corrige 12 bytes/bloque; cabe Observadora pesada con aire
+function rsEncodeBlocks(data, nsym) { const blk = 255 - nsym; const out = []; for (let i = 0; i < data.length; i += blk) out.push(...rsEncodeOne(Array.from(data.slice(i, i + blk)), nsym)); return Uint8Array.from(out); }
+function rsDecodeBlocks(code, origLen, nsym) { const blk = 255 - nsym; const out = []; let pos = 0, rem = origLen; while (rem > 0) { const d = Math.min(blk, rem); const rec = rsCorrectOne(Array.from(code.slice(pos, pos + d + nsym)), nsym); if (!rec) return null; out.push(...rec); pos += d + nsym; rem -= d; } return Uint8Array.from(out); }
+
+// Framing: [0x44 0x4D][version:u8] + ...
+// v4 = molde sin comprimir (legacy). v6 = molde deflate (legacy).
+// v7 = molde deflate + Reed-Solomon: [44 4D 07][origLen u16][nsym u8][RS bloques].
 async function encodeMoldePayload(cam) {
   const inner = encodeMoldeInner(cam);
   const compressed = await deflateRaw(inner);
-  const out = new Uint8Array(5 + compressed.length);
-  out[0] = 0x44; out[1] = 0x4D; out[2] = 0x06;
+  const rs = rsEncodeBlocks(compressed, RS_NSYM);
+  const out = new Uint8Array(6 + rs.length);
+  out[0] = 0x44; out[1] = 0x4D; out[2] = 0x07;
   out[3] = compressed.length & 0xff;
   out[4] = (compressed.length >>> 8) & 0xff;
-  out.set(compressed, 5);
+  out[5] = RS_NSYM;
+  out.set(rs, 6);
   return out;
 }
 
@@ -321,6 +346,14 @@ async function routeDecode(bytes) {
   if (v === 0x06) {
     const compLen = bytes[3] | (bytes[4] << 8);
     const compressed = bytes.slice(5, 5 + compLen);
+    const decompressed = await inflateRaw(compressed);
+    return { mode: 'molde', camiseta: decodeMoldeInner(decompressed) };
+  }
+  if (v === 0x07) {
+    const origLen = bytes[3] | (bytes[4] << 8);
+    const nsym = bytes[5];
+    const compressed = rsDecodeBlocks(bytes.slice(6), origLen, nsym);
+    if (!compressed) throw new Error('Demasiado daño en la imagen: Reed-Solomon no pudo recuperar. Probá con una foto más nítida o reenviá como documento.');
     const decompressed = await inflateRaw(compressed);
     return { mode: 'molde', camiseta: decodeMoldeInner(decompressed) };
   }
@@ -655,6 +688,10 @@ export const __internals = {
   bytesToCells,
   cellsToBytes,
   generateSVG,
+  encodeMoldeInner,
+  decodeMoldeInner,
+  deflateRaw,
+  inflateRaw,
 };
 
 // For non-module use (CommonJS in Node, etc.), also expose globally:
