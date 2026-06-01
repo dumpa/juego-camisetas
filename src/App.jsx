@@ -141,8 +141,29 @@ const SUGERENCIAS_EMOJI = ['🧭','⚓','🎭','🌱','🪶','🔥','🗺️','�
 
 // Catálogo curado por Dumpa. Estas son las camisetas pre-establecidas que un nuevo
 // usuario puede "comprar" para empezar a jugar sin tener que construir desde cero.
-// La primera (Curiosidad) es gratis: es el regalo de bienvenida.
+// Las dos primeras (Mi primera camiseta y Curiosidad) son gratis: el regalo de bienvenida.
 const CATALOGO = [
+  {
+    id: 'mi-primera-camiseta-v1',
+    nombre: 'Mi primera camiseta',
+    emoji: '👕',
+    esencia: 'Aprende a jugar, jugando.',
+    arco: { de: 'espectador', a: 'jugador' },
+    precio: 0,
+    creador_id: 'dumpa',
+    misiones: [
+      { nombre: 'Tiende tu cama',                        forma: 'recurrente', tonos: [],                          puntos_base: 2 },
+      { nombre: 'Lava un plato (u ordena un cajón)',     forma: 'facil',      tonos: [],                          puntos_base: 1 },
+      { nombre: 'Cierra tu día',                         forma: 'recurrente', tonos: [],                          puntos_base: 2 },
+      { nombre: 'Dile a alguien "te quiero"',            forma: 'dificil',    tonos: ['emocional'],               puntos_base: 3 },
+      { nombre: 'Crea tu primera camiseta',              forma: 'dificil',    tonos: ['creativa'],                puntos_base: 3 },
+      { nombre: 'Invita a alguien a crear la suya',      forma: 'dificil',    tonos: ['emocional','estrategica'], puntos_base: 3 },
+    ],
+    milestones: [
+      { nombre: 'Tendiste la cama toda la semana', regalo: 'Cómprate un chocolate (o regálate un paseo) 🍫' },
+      { nombre: 'Llegaste a 3 camisetas',          regalo: 'Ve a cine 🎬' },
+    ],
+  },
   {
     id: 'curiosidad-v1',
     nombre: 'Curiosidad',
@@ -176,20 +197,6 @@ const CATALOGO = [
       { nombre: 'Cambiar algo de tu entorno',              forma: 'facil',     tonos: ['creativa'],          puntos_base: 1 },
       { nombre: 'Solución absurda primero',                forma: 'recurrente', tonos: ['creativa','estrategica'], puntos_base: 2 },
       { nombre: 'Hacer algo sin ninguna utilidad',         forma: 'recurrente', tonos: ['creativa'],          puntos_base: 2 },
-    ],
-    milestones: [],
-  },
-  {
-    id: 'mi-primera-camiseta-v1',
-    nombre: 'Mi primera camiseta',
-    emoji: '👕',
-    esencia: 'Aprender jugando: crear e invitar.',
-    arco: { de: 'espectador', a: 'creador' },
-    precio: 0,
-    creador_id: 'dumpa',
-    misiones: [
-      { nombre: 'Crea tu primera camiseta',              forma: 'dificil', tonos: ['creativa'],               puntos_base: 3 },
-      { nombre: 'Invita a alguien a crear la suya',      forma: 'dificil', tonos: ['emocional','estrategica'], puntos_base: 3 },
     ],
     milestones: [],
   },
