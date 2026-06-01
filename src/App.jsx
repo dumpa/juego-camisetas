@@ -813,6 +813,18 @@ function CatalogoPreview({ cat, puntos, yaTenida, onBack, onComprar }) {
         </div>
       ))}
     </div>
+    {cat.milestones?.length > 0 && (<>
+      <div className="hr-deco mb-6" />
+      <h2 className="smallcaps mb-4" style={{ color: 'var(--ink-faint)' }}>Milestones que puedes lograr</h2>
+      <div className="space-y-2 mb-8">
+        {cat.milestones.map((ms, i) => (
+          <div key={i} className="flex items-start gap-3 py-1">
+            <span className="ff-serif text-base flex-1">{ms.nombre}</span>
+            {ms.regalo && <span className="ff-mono text-xs mt-1" style={{ color: 'var(--gold)' }}>🎁 {ms.regalo}</span>}
+          </div>
+        ))}
+      </div>
+    </>)}
     <div className="hr-deco mb-6" />
     {yaTenida ? (
       <p className="ff-serif italic text-base" style={{ color: 'var(--ink-faint)' }}>
