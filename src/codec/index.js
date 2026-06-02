@@ -621,6 +621,101 @@ export async function decodeImageToCamiseta(source) {
   return await routeDecode(bytes);
 }
 
+// ============================================================
+// JSON MOLDE (texto) — fallback para cuando la imagen falla por tamaño.
+// NO reemplaza el codec de imagen: es una vía adicional, equivalente al
+// modo 'molde'. Produce/consume EXACTAMENTE la misma forma de objeto que
+// decodeMoldeInner, así recibirCamiseta() funciona sin cambios.
+// Solo viaja el diseño: sin historia, estado, completions ni timestamps.
+// ============================================================
+const MOLDE_JSON_VERSION = 1;
+
+/**
+ * Extrae el molde (solo diseño) de una camiseta y lo serializa a JSON texto.
+ * @param {Object} cam - la camiseta con misiones[]/milestones[]
+ * @returns {string} JSON string listo para compartir/copiar
+ */
+export function encodeCamisetaToJSON(cam) {
+  const molde = {
+    _t: 'camiseta-molde',
+    _v: MOLDE_JSON_VERSION,
+    id: cam.id || '',
+    nombre: cam.nombre || '',
+    emoji: cam.emoji || '',
+    esencia: cam.esencia || '',
+    arco: (cam.arco?.de || cam.arco?.a)
+      ? { de: cam.arco.de || '', a: cam.arco.a || '' }
+      : null,
+    origen: cam.origen === 'comprada' ? 'comprada' : 'propia',
+    creador_id: cam.creador_id || '',
+    origen_camiseta_id: cam.origen_camiseta_id || '',
+    misiones: (cam.misiones || []).map(m => ({
+      nombre: m.nombre || '',
+      forma: m.forma || 'recurrente',
+      tonos: m.tonos || [],
+      puntos_base: m.puntos_base || 1,
+    })),
+    milestones: (cam.milestones || []).map(ms => ({
+      nombre: ms.nombre || '',
+      regalo: ms.regalo || '',
+      descripcion: ms.descripcion || '',
+    })),
+  };
+  return JSON.stringify(molde, null, 2);
+}
+
+/**
+ * Parsea un molde en JSON texto y devuelve el mismo objeto que produce el
+ * decoder de imagen (mode='molde'), validando estructura mínima.
+ * @param {string} text
+ * @returns {{mode:'molde', camiseta:Object}}
+ * @throws {Error} si el texto no es un molde válido
+ */
+export function decodeJSONToCamiseta(text) {
+  let raw;
+  try {
+    raw = JSON.parse(typeof text === 'string' ? text.trim() : text);
+  } catch (_) {
+    throw new Error('El texto no es un molde válido (no es JSON).');
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('El texto no es un molde de camiseta.');
+  }
+  if (raw._t && raw._t !== 'camiseta-molde') {
+    throw new Error('Este JSON no es una camiseta para compartir.');
+  }
+  if (!raw.nombre || typeof raw.nombre !== 'string') {
+    throw new Error('Molde inválido: falta el nombre de la camiseta.');
+  }
+  const arco = (raw.arco && (raw.arco.de || raw.arco.a))
+    ? { de: raw.arco.de || '', a: raw.arco.a || '' }
+    : null;
+  const camiseta = {
+    id: raw.id || '',
+    nombre: raw.nombre,
+    emoji: raw.emoji || '',
+    esencia: raw.esencia || '',
+    arco,
+    origen: raw.origen === 'comprada' ? 'comprada' : 'propia',
+    creador_id: raw.creador_id || '',
+    origen_camiseta_id: raw.origen_camiseta_id || '',
+    misiones: Array.isArray(raw.misiones) ? raw.misiones.map(m => ({
+      nombre: m.nombre || '',
+      forma: ['rapida', 'recurrente', 'unica'].includes(m.forma) ? m.forma : 'recurrente',
+      tonos: Array.isArray(m.tonos)
+        ? m.tonos.filter(t => ['fisica', 'emocional', 'creativa', 'profunda'].includes(t))
+        : [],
+      puntos_base: Number.isFinite(m.puntos_base) ? m.puntos_base : 1,
+    })) : [],
+    milestones: Array.isArray(raw.milestones) ? raw.milestones.map(ms => ({
+      nombre: ms.nombre || '',
+      regalo: ms.regalo || '',
+      descripcion: ms.descripcion || '',
+    })) : [],
+  };
+  return { mode: 'molde', camiseta };
+}
+
 /**
  * For app integration: convenience helper that produces the SVG string only,
  * useful if you want to render in React via dangerouslySetInnerHTML for preview
