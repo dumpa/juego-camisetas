@@ -450,11 +450,15 @@ function generateSVG(cam, payloadCells, cellList) {
     }
   }
 
-  // Pastel bands (crossing freely — full width)
-  const bands=[{y:365,h:14,c:'#00F0FF'},{y:430,h:18,c:'#DA1895'},{y:510,h:12,c:'#F4FF01'},{y:600,h:16,c:'#00F0FF'},{y:720,h:12,c:'#DA1895'}];
+  // Bandas pastel CLARAS — cruzan la zona de datos, así que DEBEN ser claras:
+  // el decoder usa las esquinas de cada celda como fondo, y bandas oscuras
+  // (neón) rompen el contraste y corrompen la lectura. Los colores neón del
+  // resto del diseño (formas, estrellas, decorativo) no tocan la zona de datos
+  // y se conservan. No oscurecer estas bandas. Ver bug del 3 jun 2026.
+  const bands=[{y:365,h:14,c:'#c6f4f9'},{y:430,h:18,c:'#ffc6d9'},{y:510,h:12,c:'#c6f4f9'},{y:600,h:16,c:'#ffc6d9'},{y:720,h:12,c:'#fff3a6'}];
   let bandsSvg='';
   for(const b of bands){
-    bandsSvg+=`<polygon points="0,${b.y} 1000,${b.y-10} 1000,${b.y+b.h-10} 0,${b.y+b.h}" fill="${b.c}" opacity="0.7"/>`;
+    bandsSvg+=`<polygon points="0,${b.y} 1000,${b.y-10} 1000,${b.y+b.h-10} 0,${b.y+b.h}" fill="${b.c}" opacity="0.85"/>`;
   }
   const greenBand=`<polygon points="0,195 1000,185 1000,221 0,231" fill="#41FF19" opacity="0.8"/>`;
 
