@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter } from 'lucide-react';
-import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta } from './codec/index.js';
+import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encodeCamisetaToJSON, decodeJSONToCamiseta } from './codec/index.js';
 
 const STATE_KEY = 'juego-camisetas:state:v1';
 const DAY = 86400000;
@@ -1379,6 +1379,8 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUn
 function ShareSheet({ cam, onClose }) {
   const [busy, setBusy] = useState(null);     // 'share' | 'download' | 'copy' | null
   const [msg, setMsg] = useState(null);       // { kind: 'ok'|'err', text }
+  const [showText, setShowText] = useState(false);  // fallback de texto desplegado
+  const [imgFailed, setImgFailed] = useState(false); // la imagen falló por tamaño u otro
 
   // Preview as <img src=blob>. Loading SVG via <img> sandboxes any embedded
   // <script> (no execution), so we don't need to trust strings the codec
@@ -1421,6 +1423,59 @@ function ShareSheet({ cam, onClose }) {
     return await encodeCamisetaToPng(cam, { mode: 'molde' });
   }
 
+  // Fallback de texto (JSON solo-molde). Adicional a la imagen, no la reemplaza.
+  const moldeJSON = useMemo(() => {
+    try { return encodeCamisetaToJSON(cam); }
+    catch (e) { console.error('molde JSON failed:', e); return null; }
+  }, [cam]);
+
+  // Si la imagen falla por tamaño (capacidad del codec), abrimos el fallback.
+  function handleImgError(e) {
+    const tooBig = /demasiado grande|capacidad|payload/i.test(e?.message || '');
+    if (tooBig) {
+      setImgFailed(true);
+      setShowText(true);
+      setMsg({ kind: 'err', text: 'La camiseta es muy grande para la imagen. Usá el texto.' });
+    } else {
+      setMsg({ kind: 'err', text: e.message || 'no se pudo generar la imagen' });
+    }
+  }
+
+  async function doShareText() {
+    if (!moldeJSON) return;
+    setBusy('share-text');
+    try {
+      const text = `«${cam.nombre}» — molde del juego de las camisetas\n\n${moldeJSON}`;
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        await navigator.share({ title: cam.nombre, text });
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setMsg({ kind: 'ok', text: 'texto copiado — pegalo donde quieras' });
+        return;
+      } else {
+        throw new Error('Tu sistema no permite compartir ni copiar texto.');
+      }
+      setMsg({ kind: 'ok', text: 'compartida como texto' });
+    } catch (e) {
+      if (e.name !== 'AbortError') setMsg({ kind: 'err', text: e.message || 'no se pudo compartir el texto' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function doCopyText() {
+    if (!moldeJSON) return;
+    setBusy('copy-text');
+    try {
+      await navigator.clipboard.writeText(moldeJSON);
+      setMsg({ kind: 'ok', text: 'molde copiado al portapapeles' });
+    } catch (e) {
+      setMsg({ kind: 'err', text: e.message || 'no se pudo copiar el texto' });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function doShare() {
     setBusy('share');
     try {
@@ -1434,7 +1489,7 @@ function ShareSheet({ cam, onClose }) {
       setMsg({ kind: 'ok', text: 'compartida' });
     } catch (e) {
       if (e.name !== 'AbortError') {
-        setMsg({ kind: 'err', text: e.message || 'no se pudo compartir' });
+        handleImgError(e);
       }
     } finally {
       setBusy(null);
@@ -1452,7 +1507,7 @@ function ShareSheet({ cam, onClose }) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setMsg({ kind: 'ok', text: 'descargada' });
     } catch (e) {
-      setMsg({ kind: 'err', text: e.message || 'no se pudo descargar' });
+      handleImgError(e);
     } finally {
       setBusy(null);
     }
@@ -1465,7 +1520,7 @@ function ShareSheet({ cam, onClose }) {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
       setMsg({ kind: 'ok', text: 'copiada al portapapeles' });
     } catch (e) {
-      setMsg({ kind: 'err', text: e.message || 'no se pudo copiar' });
+      handleImgError(e);
     } finally {
       setBusy(null);
     }
@@ -1519,6 +1574,49 @@ function ShareSheet({ cam, onClose }) {
               </button>
             )}
           </div>
+
+          {/* Fallback de texto — adicional a la imagen. Para cuando la imagen
+              falla por tamaño, o cuando se prefiere pegar el molde como texto. */}
+          {moldeJSON && (
+            <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--line-soft)' }}>
+              {imgFailed && (
+                <p className="ff-mono text-xs mb-2" style={{ color: 'var(--accent)' }}>
+                  Esta camiseta no cabe en la imagen. Compartila como texto:
+                </p>
+              )}
+              {!showText ? (
+                <button onClick={() => setShowText(true)}
+                  className="w-full ring-ink ff-mono text-xs py-2 px-4 flex items-center justify-center gap-2"
+                  style={{ color: 'var(--ink-faint)' }}>
+                  <span>¿la imagen falla? compartir como texto</span>
+                </button>
+              ) : (
+                <div className="fade-up">
+                  <p className="ff-serif italic text-xs mb-2" style={{ color: 'var(--ink-soft)' }}>
+                    Texto plano del molde. Pegalo por WhatsApp, mail o notas; quien lo reciba lo importa con “pegar texto”.
+                  </p>
+                  <textarea readOnly value={moldeJSON} rows={5}
+                    onFocus={(e) => e.target.select()}
+                    className="w-full ff-mono text-xs p-2 mb-2 resize-none"
+                    style={{ border: '1px solid var(--line)', background: 'var(--bg-card)', color: 'var(--ink-soft)' }} />
+                  <div className="space-y-2">
+                    <button onClick={doShareText} disabled={!!busy}
+                      className="w-full ring-ink ff-mono text-xs py-2.5 px-4 flex items-center justify-center gap-2"
+                      style={{ background: 'var(--ink)', color: 'var(--bg)', opacity: busy ? 0.6 : 1 }}>
+                      <Share2 size={14} />
+                      <span>{busy === 'share-text' ? 'preparando…' : 'compartir texto'}</span>
+                    </button>
+                    <button onClick={doCopyText} disabled={!!busy}
+                      className="w-full ring-ink ff-mono text-xs py-2.5 px-4 flex items-center justify-center gap-2"
+                      style={{ border: '1px solid var(--line)', color: 'var(--ink)', opacity: busy ? 0.6 : 1 }}>
+                      <Copy size={14} />
+                      <span>{busy === 'copy-text' ? 'copiando…' : 'copiar texto'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {msg && (
             <p className="ff-mono text-xs mt-3 fade-up text-center"
               style={{ color: msg.kind === 'err' ? 'var(--accent)' : 'var(--moss)' }}>
@@ -1532,14 +1630,36 @@ function ShareSheet({ cam, onClose }) {
 }
 
 function ImportSheet({ onClose, onImport }) {
-  const [phase, setPhase] = useState('pick');  // pick | loading | preview | error
+  const [phase, setPhase] = useState('pick');  // pick | loading | preview | error | text
   const [decoded, setDecoded] = useState(null);
   const [error, setError] = useState(null);
   const [previewSrc, setPreviewSrc] = useState(null);
+  const [pasted, setPasted] = useState('');
   const inputRef = useRef(null);
 
   // Cleanup blob URL on unmount or change
   useEffect(() => () => { if (previewSrc) URL.revokeObjectURL(previewSrc); }, [previewSrc]);
+
+  // Importar desde texto pegado (fallback JSON). Adicional a la imagen.
+  function handleText() {
+    setError(null);
+    try {
+      const result = decodeJSONToCamiseta(pasted);
+      if (result.mode !== 'molde') {
+        throw new Error('Ese texto no es una camiseta para compartir.');
+      }
+      try {
+        const raw = generateCamisetaSVG(result.camiseta);
+        const blob = new Blob([raw], { type: 'image/svg+xml' });
+        setPreviewSrc(URL.createObjectURL(blob));
+      } catch (_) { /* preview best-effort */ }
+      setDecoded(result.camiseta);
+      setPhase('preview');
+    } catch (e) {
+      setError(e.message || 'No se pudo leer el texto.');
+      setPhase('error');
+    }
+  }
 
   async function handleFile(file) {
     if (!file) return;
@@ -1580,6 +1700,7 @@ function ImportSheet({ onClose, onImport }) {
     setPreviewSrc(null);
     setDecoded(null);
     setError(null);
+    setPasted('');
     setPhase('pick');
     if (inputRef.current) inputRef.current.value = '';
   }
@@ -1606,6 +1727,35 @@ function ImportSheet({ onClose, onImport }) {
       <p className="ff-mono text-xs mt-6" style={{ color: 'var(--ink-faint)' }}>
         Solo viaja el diseño. Las misiones empiezan en cero — el camino lo haces tú.
       </p>
+      <button onClick={() => { setError(null); setPhase('text'); }}
+        className="w-full ring-ink ff-mono text-xs py-2.5 px-4 mt-4 flex items-center justify-center gap-2"
+        style={{ border: '1px solid var(--line)', color: 'var(--ink-soft)' }}>
+        <Inbox size={14} />
+        <span>¿te la pasaron como texto? pegar texto</span>
+      </button>
+    </>)}
+
+    {phase === 'text' && (<>
+      <h1 className="display text-4xl mb-2">Pegar el texto</h1>
+      <p className="ff-serif italic text-base mb-6" style={{ color: 'var(--ink-soft)' }}>
+        Si la camiseta no cupo en una imagen, te la pasaron como texto. Pegalo acá completo.
+      </p>
+      <textarea value={pasted} onChange={(e) => setPasted(e.target.value)} autoFocus rows={8}
+        placeholder="Pegá aquí el molde en texto…"
+        className="w-full ff-mono text-xs p-3 mb-4 resize-none ring-ink"
+        style={{ border: '1px solid var(--line)', background: 'var(--bg-card)', color: 'var(--ink)' }} />
+      <div className="space-y-2">
+        <button onClick={handleText} disabled={!pasted.trim()}
+          className="w-full ring-ink ff-serif text-base py-3 px-4"
+          style={{ background: 'var(--ink)', color: 'var(--bg)', opacity: pasted.trim() ? 1 : 0.5 }}>
+          Leer el texto
+        </button>
+        <button onClick={() => { setPasted(''); setPhase('pick'); }}
+          className="w-full ring-ink ff-mono text-xs py-2 px-4"
+          style={{ color: 'var(--ink-faint)' }}>
+          ← volver a imagen
+        </button>
+      </div>
     </>)}
 
     {phase === 'loading' && (<div className="text-center py-16">
@@ -2414,12 +2564,18 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onCreateCam, onClose }
   const [sentir, setSentir] = useState('');
   const [regla, setRegla] = useState('');
   const [falta, setFalta] = useState('');
+  const [honesto, setHonesto] = useState('');   // A2: pregunta de honestidad, campo propio
+  const [notaLibre, setNotaLibre] = useState(''); // A1: nota libre sin estructura
   const activas = cams.filter(c => !c.archived_at);
   const finish = () => onClose({
+    honesto: honesto.trim(),
+    nota_libre: notaLibre.trim(),
     notas: [
       sentir.trim() && `Se siente: ${sentir.trim()}`,
       regla.trim() && `Regla a cambiar: ${regla.trim()}`,
       falta.trim() && `Falta camiseta: ${falta.trim()}`,
+      honesto.trim() && `Honestidad: ${honesto.trim()}`,
+      notaLibre.trim() && `Nota: ${notaLibre.trim()}`,
     ].filter(Boolean).join(' · '),
   });
   return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
@@ -2427,7 +2583,7 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onCreateCam, onClose }
       <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>El observador del observador</span>
       <button onClick={() => onClose({ notas: '' })} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={18} /></button>
     </div>
-    <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{step + 1} / 4</div>
+    <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{step + 1} / 5</div>
     {step === 0 && (<div className="fade-up">
       <h2 className="display text-3xl mb-2">El mazo.</h2>
       <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>¿Sigue cada camiseta siendo verdadera para ti? Retira sin culpa lo que ya no.</p>
@@ -2469,8 +2625,17 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onCreateCam, onClose }
     </div>)}
     {step === 3 && (<div className="fade-up">
       <h2 className="display text-3xl mb-2">Una regla a cambiar.</h2>
-      <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Del juego, no de la vida. Lo que ya no sirve como está.</p>
+      <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Del juego, o de la vida. Lo que ya no sirve como está.</p>
       <textarea value={regla} onChange={e => setRegla(e.target.value)} autoFocus rows={4} placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+      <NavButtons onBack={() => setStep(step - 1)} onNext={() => setStep(step + 1)} />
+    </div>)}
+    {step === 4 && (<div className="fade-up">
+      <h2 className="display text-3xl mb-2">¿Estoy siendo honesto conmigo?</h2>
+      <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Sin maquillar el mes. Lo que sea verdad.</p>
+      <textarea value={honesto} onChange={e => setHonesto(e.target.value)} autoFocus rows={3} placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+      <label className="smallcaps block mt-6 mb-2" style={{ color: 'var(--ink-faint)' }}>Nota libre</label>
+      <p className="ff-serif italic text-sm mb-2" style={{ color: 'var(--ink-soft)' }}>Lo que quieras dejar anotado, sin estructura.</p>
+      <textarea value={notaLibre} onChange={e => setNotaLibre(e.target.value)} rows={3} placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
       <div className="flex justify-between mt-8">
         <button onClick={() => setStep(step - 1)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
         <button onClick={finish} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>cerrar el mes</button>
