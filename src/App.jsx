@@ -1249,9 +1249,22 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
 // un gesto deliberado (no un tap), y una línea opcional que viaja con la copia.
 // Soltar una camiseta = soltar una identidad que vestiste. Esto lo honra.
 function DespedidaRitual({ cam, movimientos, onDedicatoria, onShare, onDonate, onCancel }) {
-  const [fase, setFase] = useState('vistazo');  // vistazo | dedicatoria | gesto
+  const [fase, setFase] = useState('vistazo');  // vistazo | dedicatoria | soltar
   const [dedicatoria, setDedicatoria] = useState('');
+  const [previewSrc, setPreviewSrc] = useState(null);
   const setDed = (v) => { const t = v.slice(0, 140); setDedicatoria(t); if (onDedicatoria) onDedicatoria(t); };
+
+  // Imagen de la camiseta para la pantalla final (último vistazo / compartir).
+  useEffect(() => {
+    let url = null;
+    try {
+      const raw = generateCamisetaSVG(cam, { mode: 'molde' });
+      const blob = new Blob([raw], { type: 'image/svg+xml' });
+      url = URL.createObjectURL(blob);
+      setPreviewSrc(url);
+    } catch (_) { /* sin preview si falla */ }
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [cam]);
 
   // Movimiento 1 — la vida de esta camiseta (los datos ya existen).
   const vida = useMemo(() => {
@@ -1292,12 +1305,12 @@ function DespedidaRitual({ cam, movimientos, onDedicatoria, onShare, onDonate, o
     </>)}
 
     {fase === 'dedicatoria' && (<>
-      <p className="ff-serif text-lg mb-1" style={{ color: 'var(--ink)' }}>Una línea que viaja.</p>
+      <p className="ff-serif text-lg mb-1" style={{ color: 'var(--ink)' }}>Despídete de ella.</p>
       <p className="ff-serif text-sm mb-4" style={{ color: 'var(--ink-soft)' }}>
-        Tu historia no viaja —eso es privado—. Pero puedes dejar una dedicatoria para quien la reciba. Como escribir dentro de una camiseta heredada. (Puedes dejarlo vacío.)
+        Escríbele algo a la camiseta antes de soltarla. Una despedida. Tu historia no viaja —eso es privado—, pero esta línea sí: queda en la prenda, y quien la reciba también podrá leerla. (Puedes dejarlo vacío.)
       </p>
       <textarea value={dedicatoria} onChange={e => setDed(e.target.value)} autoFocus rows={2}
-        placeholder="Para quien la reciba…" className="w-full ff-serif text-base p-3 mb-2 ring-ink resize-none italic"
+        placeholder="Lo que quieras decirle…" className="w-full ff-serif text-base p-3 mb-2 ring-ink resize-none italic"
         style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
       <p className="ff-mono text-xs mb-5" style={{ color: 'var(--ink-faint)' }}>{dedicatoria.length}/140</p>
       <div className="flex items-center gap-3 flex-wrap">
@@ -1305,17 +1318,26 @@ function DespedidaRitual({ cam, movimientos, onDedicatoria, onShare, onDonate, o
           style={{ color: 'var(--ink-soft)', border: '1px solid var(--line)' }}>
           <Share2 size={12} /><span>compartir copia</span>
         </button>
-        <button onClick={() => setFase('gesto')} className="ff-serif text-base ring-ink px-5 py-2"
+        <button onClick={() => setFase('soltar')} className="ff-serif text-base ring-ink px-5 py-2"
           style={{ background: 'var(--ink)', color: 'var(--bg)' }}>continuar →</button>
         <button onClick={() => setFase('vistazo')} className="ff-mono text-xs ring-ink px-3 py-1" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
       </div>
     </>)}
 
-    {fase === 'gesto' && (<>
-      <p className="ff-serif text-lg mb-1" style={{ color: 'var(--ink)' }}>Suéltala.</p>
-      <p className="ff-serif text-sm mb-6" style={{ color: 'var(--ink-soft)' }}>
-        Mantén presionado hasta que se complete. Un segundo a propósito: eso es la despedida.
+    {fase === 'soltar' && (<>
+      <p className="ff-serif text-lg mb-1" style={{ color: 'var(--ink)' }}>Una última vez.</p>
+      <p className="ff-serif text-sm mb-4" style={{ color: 'var(--ink-soft)' }}>
+        Mírala una vez más. Si quieres, envíasela a quien siga —esta es la última oportunidad—. Luego, suéltala.
       </p>
+      {previewSrc && (
+        <div className="mb-4" style={{ border: '1px solid var(--line)', maxWidth: '240px', margin: '0 auto 1rem' }}>
+          <img src={previewSrc} alt={`Diseño de ${cam.nombre}`} style={{ width: '100%', height: 'auto', display: 'block' }} />
+        </div>
+      )}
+      <button onClick={onShare} className="w-full ring-ink ff-mono text-xs px-3 py-2.5 mb-5 flex items-center justify-center gap-1.5"
+        style={{ color: 'var(--ink-soft)', border: '1px solid var(--line)' }}>
+        <Share2 size={13} /><span>compartir la imagen</span>
+      </button>
       <HoldToRelease label="mantener para soltar" onComplete={() => onDonate(dedicatoria)} />
       <button onClick={() => setFase('dedicatoria')} className="ff-mono text-xs ring-ink px-3 py-1 mt-5" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
     </>)}
