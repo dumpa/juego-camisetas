@@ -649,6 +649,7 @@ export function encodeCamisetaToJSON(cam) {
     origen: cam.origen === 'comprada' ? 'comprada' : 'propia',
     creador_id: cam.creador_id || '',
     origen_camiseta_id: cam.origen_camiseta_id || '',
+    dedicatoria: (cam.dedicatoria || '').trim() || '',
     misiones: (cam.misiones || []).map(m => ({
       nombre: m.nombre || '',
       forma: m.forma || 'recurrente',
@@ -673,10 +674,24 @@ export function encodeCamisetaToJSON(cam) {
  */
 export function decodeJSONToCamiseta(text) {
   let raw;
+  const tryParse = (str) => JSON.parse(str);
+  const input = typeof text === 'string' ? text.trim() : text;
   try {
-    raw = JSON.parse(typeof text === 'string' ? text.trim() : text);
+    raw = tryParse(input);
   } catch (_) {
-    throw new Error('El texto no es un molde válido (no es JSON).');
+    // El texto compartido puede llevar una descripción humana antes del JSON
+    // (p. ej. «Capitán» — molde…). Extraemos el objeto JSON entre la primera
+    // llave y la última, para que quien recibe pueda pegar TODO sin recortar.
+    if (typeof input === 'string') {
+      const a = input.indexOf('{');
+      const b = input.lastIndexOf('}');
+      if (a !== -1 && b > a) {
+        try { raw = tryParse(input.slice(a, b + 1)); } catch (_) { /* cae al error de abajo */ }
+      }
+    }
+    if (raw === undefined) {
+      throw new Error('El texto no es un molde válido (no es JSON).');
+    }
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('El texto no es un molde de camiseta.');
@@ -699,6 +714,7 @@ export function decodeJSONToCamiseta(text) {
     origen: raw.origen === 'comprada' ? 'comprada' : 'propia',
     creador_id: raw.creador_id || '',
     origen_camiseta_id: raw.origen_camiseta_id || '',
+    dedicatoria: (raw.dedicatoria || '').trim() || '',
     misiones: Array.isArray(raw.misiones) ? raw.misiones.map(m => ({
       nombre: m.nombre || '',
       forma: ['rapida', 'recurrente', 'unica'].includes(m.forma) ? m.forma : 'recurrente',
