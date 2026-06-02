@@ -299,6 +299,7 @@ export default function App() {
   const [previewCat, setPreviewCat] = useState(null);
   const [showImport, setShowImport] = useState(false);
   const [sesion, setSesion] = useState(null);
+  const [showNota, setShowNota] = useState(false);  // hoja de nota rápida (global)
 
   useEffect(() => { loadState().then(setState); }, []);
   useEffect(() => {
@@ -567,6 +568,14 @@ export default function App() {
     pushEv(s, { ...data, tipo: `sesion_${data.tipo}`, sesion_id: id, notas: data.notas });
   });
 
+  // Nota rápida: capturar un pensamiento suelto sin hacer un check-in completo.
+  // Va directo a "la historia" como evento 'nota'. No es una sesión.
+  const tomarNota = (texto) => {
+    const t = (texto || '').trim();
+    if (!t) return;
+    update(s => { pushEv(s, { tipo: 'nota', texto: t }); });
+  };
+
   if (!state) return <Loading />;
   const camsActivas = state.camisetas.filter(c => !c.archived_at);
   const puntosUser = puntosTotales(state.movimientos);
@@ -650,8 +659,57 @@ export default function App() {
       {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onRevive={reviveCamiseta} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion} />}
     </main>
+    <QuickNoteButton onClick={() => setShowNota(true)} />
     <TabBar tab={tab} setTab={setTab} />
+    {showNota && <QuickNoteSheet onClose={() => setShowNota(false)} onSave={(t) => { tomarNota(t); setShowNota(false); }} />}
   </Frame>);
+}
+
+// Botón flotante de nota rápida — siempre disponible, encima del TabBar.
+function QuickNoteButton({ onClick }) {
+  return (
+    <button onClick={onClick} aria-label="Tomar una nota"
+      className="fixed right-5 ring-ink flex items-center gap-2 ff-mono text-xs px-4 py-3 shadow-lg"
+      style={{ bottom: '6.5rem', zIndex: 40, background: 'var(--ink)', color: 'var(--bg)', borderRadius: '999px' }}>
+      <Edit2 size={15} strokeWidth={1.8} />
+      <span>nota</span>
+    </button>
+  );
+}
+
+// Hoja de nota rápida — captura un pensamiento suelto sin abrir un check-in.
+function QuickNoteSheet({ onClose, onSave }) {
+  const [texto, setTexto] = useState('');
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 fade-up"
+      style={{ background: 'rgba(28, 24, 19, 0.55)' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md"
+        style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
+        <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '1px solid var(--line-soft)' }}>
+          <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Una nota</span>
+          <button onClick={onClose} className="ring-ink p-1" aria-label="Cerrar"><X size={16} style={{ color: 'var(--ink-faint)' }} /></button>
+        </div>
+        <div className="px-5 py-4">
+          <p className="ff-serif italic text-sm mb-3" style={{ color: 'var(--ink-soft)' }}>
+            Un pensamiento, sin más. Queda en tu diario.
+          </p>
+          <textarea value={texto} onChange={e => setTexto(e.target.value)} autoFocus rows={4}
+            placeholder="…" className="w-full ff-serif text-base p-3 mb-3 ring-ink resize-none"
+            style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+          <button onClick={() => onSave(texto)} disabled={!texto.trim()}
+            className="w-full ring-ink ff-serif text-base py-3 px-4"
+            style={{ background: 'var(--ink)', color: 'var(--bg)', opacity: texto.trim() ? 1 : 0.5 }}>
+            Guardar nota
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Frame({ children }) {
@@ -2295,6 +2353,9 @@ function EventoItem({ e, cam, lookupCam }) {
     case 'sesion_mensual':
       glyph = '☾'; color = 'var(--accent)';
       text = <strong>observador del observador</strong>; break;
+    case 'nota':
+      glyph = '✎'; color = 'var(--ink-soft)';
+      text = <span style={{ color: 'var(--ink-soft)' }} className="italic">{e.texto}</span>; break;
     default:
       glyph = '·'; color = 'var(--ink-faint)'; text = e.tipo;
   }
@@ -2441,8 +2502,10 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
   const [notas, setNotas] = useState('');
   const totalSteps = cams.length + 2;
   const finish = () => {
-    Object.entries(nuevas).forEach(([camId, m]) => {
-      if (m?.nombre?.trim()) onAddMision(camId, { nombre: m.nombre.trim(), forma: m.forma || 'dificil', tonos: m.tonos || [], puntos_base: m.puntos_base });
+    Object.entries(nuevas).forEach(([camId, lista]) => {
+      (lista || []).forEach(m => {
+        if (m?.nombre?.trim()) onAddMision(camId, { nombre: m.nombre.trim(), forma: m.forma || 'dificil', tonos: m.tonos || [], puntos_base: m.puntos_base });
+      });
     });
     onClose({ notas: notas.trim(), caliente, fria });
   };
@@ -2455,7 +2518,14 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
     {step < cams.length && (() => {
       const cam = cams[step];
       const activas = cam.misiones.filter(m => enJuego(m));
-      const nueva = nuevas[cam.id] || { nombre: '', forma: 'dificil', tonos: [] };
+      const drafts = nuevas[cam.id] || [];
+      const setDrafts = (lista) => setNuevas({ ...nuevas, [cam.id]: lista });
+      const updateDraft = (i, patch) => setDrafts(drafts.map((d, j) => j === i ? { ...d, ...patch } : d));
+      const addDraft = () => setDrafts([...drafts, { nombre: '', forma: 'dificil', tonos: [] }]);
+      const removeDraft = (i) => setDrafts(drafts.filter((_, j) => j !== i));
+      // Siempre mostramos al menos un campo en blanco para empezar.
+      const visibles = drafts.length === 0 ? [{ nombre: '', forma: 'dificil', tonos: [] }] : drafts;
+      const ultimaTieneNombre = visibles[visibles.length - 1]?.nombre?.trim();
       return (<div className="fade-up">
         <div className="text-4xl mb-2">{cam.emoji}</div>
         <h2 className="display text-3xl mb-2">{cam.nombre}</h2>
@@ -2473,16 +2543,38 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
         </div>
         <div className="hr-deco mb-5" />
         <label className="smallcaps block mb-3" style={{ color: 'var(--ink-faint)' }}>¿Qué nace esta semana?</label>
-        <input value={nueva.nombre} onChange={e => setNuevas({ ...nuevas, [cam.id]: { ...nueva, nombre: e.target.value } })} placeholder="(opcional)" className="w-full ff-serif text-base pb-1 mb-3 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
-        {nueva.nombre.trim() && (<div className="flex flex-wrap gap-1 mb-3">
-          {FORMAS.map(f => (
-            <button key={f.id} onClick={() => setNuevas({ ...nuevas, [cam.id]: { ...nueva, forma: f.id } })} className="ff-mono text-xs px-2 py-1 ring-ink" style={{
-              background: (nueva.forma || 'dificil') === f.id ? 'var(--ink)' : 'transparent',
-              color: (nueva.forma || 'dificil') === f.id ? 'var(--bg)' : 'var(--ink-soft)',
-              border: '1px solid ' + ((nueva.forma || 'dificil') === f.id ? 'var(--ink)' : 'var(--line)'),
-            }}>{f.glyph} {f.label}</button>
-          ))}
-        </div>)}
+        {visibles.map((d, i) => (
+          <div key={i} className="mb-4">
+            <div className="flex items-center gap-2">
+              <input value={d.nombre}
+                onChange={e => {
+                  const base = drafts.length === 0 ? [{ nombre: '', forma: 'dificil', tonos: [] }] : drafts.slice();
+                  base[i] = { ...base[i], nombre: e.target.value };
+                  setDrafts(base);
+                }}
+                placeholder="(opcional)" className="flex-1 ff-serif text-base pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+              {drafts.length > 1 && (
+                <button onClick={() => removeDraft(i)} className="ring-ink ff-mono text-xs p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Quitar"><X size={14} /></button>
+              )}
+            </div>
+            {d.nombre?.trim() && (<div className="flex flex-wrap gap-1 mt-2">
+              {FORMAS.map(f => (
+                <button key={f.id} onClick={() => updateDraft(i, { forma: f.id })} className="ff-mono text-xs px-2 py-1 ring-ink" style={{
+                  background: (d.forma || 'dificil') === f.id ? 'var(--ink)' : 'transparent',
+                  color: (d.forma || 'dificil') === f.id ? 'var(--bg)' : 'var(--ink-soft)',
+                  border: '1px solid ' + ((d.forma || 'dificil') === f.id ? 'var(--ink)' : 'var(--line)'),
+                }}>{f.glyph} {f.label}</button>
+              ))}
+            </div>)}
+          </div>
+        ))}
+        {ultimaTieneNombre && (
+          <button onClick={() => { if (drafts.length === 0) setDrafts(visibles); addDraft(); }}
+            className="ring-ink ff-mono text-xs py-1 px-3 mb-3 flex items-center gap-1"
+            style={{ color: 'var(--accent)', border: '1px solid var(--accent-soft)' }}>
+            <Plus size={12} /> añadir otra
+          </button>
+        )}
         <NavButtons onBack={step === 0 ? null : () => setStep(step - 1)} onNext={() => setStep(step + 1)} />
       </div>);
     })()}
@@ -2565,17 +2657,14 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onCreateCam, onClose }
   const [regla, setRegla] = useState('');
   const [falta, setFalta] = useState('');
   const [honesto, setHonesto] = useState('');   // A2: pregunta de honestidad, campo propio
-  const [notaLibre, setNotaLibre] = useState(''); // A1: nota libre sin estructura
   const activas = cams.filter(c => !c.archived_at);
   const finish = () => onClose({
     honesto: honesto.trim(),
-    nota_libre: notaLibre.trim(),
     notas: [
       sentir.trim() && `Se siente: ${sentir.trim()}`,
       regla.trim() && `Regla a cambiar: ${regla.trim()}`,
       falta.trim() && `Falta camiseta: ${falta.trim()}`,
       honesto.trim() && `Honestidad: ${honesto.trim()}`,
-      notaLibre.trim() && `Nota: ${notaLibre.trim()}`,
     ].filter(Boolean).join(' · '),
   });
   return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
@@ -2612,7 +2701,10 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onCreateCam, onClose }
     </div>)}
     {step === 1 && (<div className="fade-up">
       <h2 className="display text-3xl mb-2">¿Falta alguna?</h2>
-      <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Una identidad que ya estás viviendo sin nombre todavía.</p>
+      <p className="ff-serif italic mb-3" style={{ color: 'var(--ink-soft)' }}>Una identidad que ya estás viviendo sin nombre todavía.</p>
+      <p className="ff-serif text-sm mb-6" style={{ color: 'var(--ink-soft)' }}>
+        Mira tu vida fuera del juego: ¿hay un área que no estás observando —tu salud, una relación, el dinero, algo que quieres aprender— y que una camiseta nueva podría ayudarte a sostener?
+      </p>
       <input value={falta} onChange={e => setFalta(e.target.value)} autoFocus placeholder="(opcional)" className="w-full ff-serif text-xl pb-2 mb-4 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
       {falta.trim() && <button onClick={onCreateCam} className="ff-mono text-xs ring-ink py-1 px-3" style={{ color: 'var(--accent)', border: '1px solid var(--accent)' }}>construirla ahora →</button>}
       <NavButtons onBack={() => setStep(step - 1)} onNext={() => setStep(step + 1)} />
@@ -2632,10 +2724,7 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onCreateCam, onClose }
     {step === 4 && (<div className="fade-up">
       <h2 className="display text-3xl mb-2">¿Estoy siendo honesto conmigo?</h2>
       <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Sin maquillar el mes. Lo que sea verdad.</p>
-      <textarea value={honesto} onChange={e => setHonesto(e.target.value)} autoFocus rows={3} placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
-      <label className="smallcaps block mt-6 mb-2" style={{ color: 'var(--ink-faint)' }}>Nota libre</label>
-      <p className="ff-serif italic text-sm mb-2" style={{ color: 'var(--ink-soft)' }}>Lo que quieras dejar anotado, sin estructura.</p>
-      <textarea value={notaLibre} onChange={e => setNotaLibre(e.target.value)} rows={3} placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+      <textarea value={honesto} onChange={e => setHonesto(e.target.value)} autoFocus rows={4} placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
       <div className="flex justify-between mt-8">
         <button onClick={() => setStep(step - 1)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
         <button onClick={finish} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>cerrar el mes</button>
