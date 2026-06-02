@@ -418,10 +418,11 @@ export default function App() {
   // Donar: la camiseta sale de tu set de verdad (no al closet). Los movimientos
   // de puntos quedan intactos, así que conservas lo que ganaste, y el diario
   // guarda el registro. La copia limpia se comparte aparte, vía ShareSheet (molde).
-  const donarCamiseta = (id) => update(s => {
+  const donarCamiseta = (id, dedicatoria) => update(s => {
     const c = s.camisetas.find(c => c.id === id);
     if (!c) return;
-    pushEv(s, { tipo: 'camiseta_donada', cam_id: id, nombre: c.nombre, emoji: c.emoji });
+    const ded = (dedicatoria || '').trim();
+    pushEv(s, { tipo: 'camiseta_donada', cam_id: id, nombre: c.nombre, emoji: c.emoji, dedicatoria: ded || undefined });
     s.camisetas = s.camisetas.filter(x => x.id !== id);
   });
   const editCamiseta = (id, data) => update(s => {
@@ -625,7 +626,7 @@ export default function App() {
   if (openCam) {
     const cam = state.camisetas.find(c => c.id === openCam);
     if (!cam) { setOpenCam(null); return null; }
-    return <Frame><CamisetaDetail cam={cam} onBack={() => setOpenCam(null)}
+    return <Frame><CamisetaDetail cam={cam} movimientos={state.movimientos} onBack={() => setOpenCam(null)}
       onAddMision={(m) => addMision(cam.id, m)}
       onEditMision={(id, d) => editMision(cam.id, id, d)}
       onToggle={(id) => toggleMision(cam.id, id)}
@@ -640,7 +641,7 @@ export default function App() {
       onEditCam={(d) => editCamiseta(cam.id, d)}
       onReviveCam={() => reviveCamiseta(cam.id)}
       onArchiveCam={() => { archiveCamiseta(cam.id); setOpenCam(null); }}
-      onDonateCam={() => { donarCamiseta(cam.id); setOpenCam(null); }} /></Frame>;
+      onDonateCam={(dedicatoria) => { donarCamiseta(cam.id, dedicatoria); setOpenCam(null); }} /></Frame>;
   }
   if (sesion === 'diaria') return <Frame><SesionDiaria cams={camsActivas} onToggle={toggleMision} onArchive={archiveMision}
     onClose={(n) => { if (n) logSesion({ tipo: 'diaria', notas: n }); setSesion(null); }} /></Frame>;
@@ -649,7 +650,7 @@ export default function App() {
     onAjustarDificultad={ajustarDif} onCambiarForma={cambiarForma}
     onClose={(p) => { logSesion({ tipo: 'semanal', ...p }); setSesion(null); }} /></Frame>;
   if (sesion === 'mensual') return <Frame><SesionMensual cams={state.camisetas}
-    onArchiveCam={archiveCamiseta} onReviveCam={reviveCamiseta}
+    onArchiveCam={archiveCamiseta} onReviveCam={reviveCamiseta} onDonateCam={donarCamiseta}
     onCreateCam={() => { setSesion(null); setShowCreate(true); }}
     onClose={(p) => { logSesion({ tipo: 'mensual', ...p }); setSesion(null); }} /></Frame>;
 
@@ -1244,15 +1245,138 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
   </div>);
 }
 
-function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUndo, onArchive, onRevive, onDelete, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam, onDonateCam }) {
+// El ritual de despedida (donar v2). Tres movimientos: un último vistazo,
+// un gesto deliberado (no un tap), y una línea opcional que viaja con la copia.
+// Soltar una camiseta = soltar una identidad que vestiste. Esto lo honra.
+function DespedidaRitual({ cam, movimientos, onDedicatoria, onShare, onDonate, onCancel }) {
+  const [fase, setFase] = useState('vistazo');  // vistazo | dedicatoria | gesto
+  const [dedicatoria, setDedicatoria] = useState('');
+  const setDed = (v) => { const t = v.slice(0, 140); setDedicatoria(t); if (onDedicatoria) onDedicatoria(t); };
+
+  // Movimiento 1 — la vida de esta camiseta (los datos ya existen).
+  const vida = useMemo(() => {
+    const dias = cam.created_at
+      ? Math.max(1, Math.round((Date.now() - new Date(cam.created_at).getTime()) / 86400000))
+      : null;
+    const completadas = (movimientos || []).filter(m => m.cam_id === cam.id && m.tipo === 'mision_completada').length;
+    const pts = round1(puntosCamiseta(movimientos, cam.id));
+    const milestonesLogrados = (cam.milestones || []).filter(ms => ms.logrado_at || ms.completed_at || ms.estado === 'logrado');
+    return { dias, completadas, pts, milestonesLogrados };
+  }, [cam, movimientos]);
+
+  return (<div className="fade-up max-w-md">
+    {fase === 'vistazo' && (<>
+      <div className="text-4xl mb-3">{cam.emoji}</div>
+      <p className="ff-serif text-lg mb-1" style={{ color: 'var(--ink)' }}>
+        La vida de <strong>{cam.nombre}</strong>
+      </p>
+      <p className="ff-serif text-sm mb-4" style={{ color: 'var(--ink-soft)' }}>
+        {vida.dias != null && <>La vestiste {vida.dias} {vida.dias === 1 ? 'día' : 'días'}. </>}
+        {vida.completadas > 0 && <>{vida.completadas} {vida.completadas === 1 ? 'misión cumplida' : 'misiones cumplidas'}. </>}
+        {vida.pts > 0 && <>{vida.pts} puntos. </>}
+        {cam.arco?.a && <>Llegaste a {cam.arco.a}.</>}
+      </p>
+      {vida.milestonesLogrados.length > 0 && (
+        <div className="mb-4 ff-mono text-xs" style={{ color: 'var(--gold)' }}>
+          {vida.milestonesLogrados.slice(0, 2).map((ms, i) => <div key={i}>◆ {ms.nombre}</div>)}
+        </div>
+      )}
+      <p className="ff-serif italic text-base mb-2" style={{ color: 'var(--ink-soft)' }}>La usaste hasta aprender lo que tenía que enseñarte.</p>
+      <p className="ff-serif italic text-base mb-2" style={{ color: 'var(--ink-soft)' }}>Ahora la doblas.</p>
+      <p className="ff-serif italic text-base mb-6" style={{ color: 'var(--ink-soft)' }}>No la tiras: alguien empieza donde tú lo dejaste.</p>
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={() => setFase('dedicatoria')} className="ff-serif text-base ring-ink px-5 py-2"
+          style={{ background: 'var(--ink)', color: 'var(--bg)' }}>despedirla →</button>
+        <button onClick={onCancel} className="ff-mono text-xs ring-ink px-3 py-1" style={{ color: 'var(--ink-faint)' }}>cancelar</button>
+      </div>
+    </>)}
+
+    {fase === 'dedicatoria' && (<>
+      <p className="ff-serif text-lg mb-1" style={{ color: 'var(--ink)' }}>Una línea que viaja.</p>
+      <p className="ff-serif text-sm mb-4" style={{ color: 'var(--ink-soft)' }}>
+        Tu historia no viaja —eso es privado—. Pero puedes dejar una dedicatoria para quien la reciba. Como escribir dentro de una camiseta heredada. (Puedes dejarlo vacío.)
+      </p>
+      <textarea value={dedicatoria} onChange={e => setDed(e.target.value)} autoFocus rows={2}
+        placeholder="Para quien la reciba…" className="w-full ff-serif text-base p-3 mb-2 ring-ink resize-none italic"
+        style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+      <p className="ff-mono text-xs mb-5" style={{ color: 'var(--ink-faint)' }}>{dedicatoria.length}/140</p>
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={onShare} className="ff-mono text-xs ring-ink px-3 py-1.5 flex items-center gap-1.5"
+          style={{ color: 'var(--ink-soft)', border: '1px solid var(--line)' }}>
+          <Share2 size={12} /><span>compartir copia</span>
+        </button>
+        <button onClick={() => setFase('gesto')} className="ff-serif text-base ring-ink px-5 py-2"
+          style={{ background: 'var(--ink)', color: 'var(--bg)' }}>continuar →</button>
+        <button onClick={() => setFase('vistazo')} className="ff-mono text-xs ring-ink px-3 py-1" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
+      </div>
+    </>)}
+
+    {fase === 'gesto' && (<>
+      <p className="ff-serif text-lg mb-1" style={{ color: 'var(--ink)' }}>Suéltala.</p>
+      <p className="ff-serif text-sm mb-6" style={{ color: 'var(--ink-soft)' }}>
+        Mantén presionado hasta que se complete. Un segundo a propósito: eso es la despedida.
+      </p>
+      <HoldToRelease label="mantener para soltar" onComplete={() => onDonate(dedicatoria)} />
+      <button onClick={() => setFase('dedicatoria')} className="ff-mono text-xs ring-ink px-3 py-1 mt-5" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
+    </>)}
+  </div>);
+}
+
+// Movimiento 2 — el gesto. Mantener presionado ~1.5s; la barra se llena.
+// Un clic rápido no se siente como soltar algo.
+function HoldToRelease({ label, onComplete, duration = 1500 }) {
+  const [progress, setProgress] = useState(0);
+  const raf = useRef(null);
+  const start = useRef(null);
+  const done = useRef(false);
+
+  const tick = (t) => {
+    if (start.current == null) start.current = t;
+    const p = Math.min(1, (t - start.current) / duration);
+    setProgress(p);
+    if (p >= 1) {
+      if (!done.current) { done.current = true; onComplete(); }
+      return;
+    }
+    raf.current = requestAnimationFrame(tick);
+  };
+  const begin = () => {
+    if (done.current) return;
+    start.current = null;
+    raf.current = requestAnimationFrame(tick);
+  };
+  const cancel = () => {
+    if (done.current) return;
+    if (raf.current) cancelAnimationFrame(raf.current);
+    start.current = null;
+    setProgress(0);
+  };
+  useEffect(() => () => { if (raf.current) cancelAnimationFrame(raf.current); }, []);
+
+  return (
+    <button
+      onMouseDown={begin} onMouseUp={cancel} onMouseLeave={cancel}
+      onTouchStart={(e) => { e.preventDefault(); begin(); }} onTouchEnd={cancel}
+      className="relative w-full ring-ink overflow-hidden select-none"
+      style={{ border: '1px solid var(--accent)', height: '3rem', background: 'transparent' }}>
+      <div className="absolute inset-0" style={{ width: `${progress * 100}%`, background: 'var(--accent)', transition: progress === 0 ? 'width 0.2s ease' : 'none' }} />
+      <span className="relative ff-mono text-xs" style={{ color: progress > 0.5 ? 'var(--bg)' : 'var(--accent)' }}>
+        {progress >= 1 ? 'soltando…' : label}
+      </span>
+    </button>
+  );
+}
+
+function CamisetaDetail({ cam, movimientos, onBack, onAddMision, onEditMision, onToggle, onUndo, onArchive, onRevive, onDelete, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam, onDonateCam }) {
   const [adding, setAdding] = useState(false);
   const [addingMs, setAddingMs] = useState(false);
   const [editing, setEditing] = useState(null);
   const [editingMs, setEditingMs] = useState(null);
   const [editingCam, setEditingCam] = useState(false);
   const [confirmRetiro, setConfirmRetiro] = useState(false);
-  const [confirmDonar, setConfirmDonar] = useState(false);
+  const [confirmDonar, setConfirmDonar] = useState(false);  // abre el ritual de despedida
   const [sharing, setSharing] = useState(false);
+  const [donateDed, setDonateDed] = useState('');  // dedicatoria del ritual, viaja con la copia compartida
   const activas = cam.misiones.filter(m => enJuego(m));
   const hechas = cam.misiones.filter(m => m.estado === 'hecha' && m.forma !== 'recurrente');
   const archivadas = cam.misiones.filter(m => m.estado === 'archivada');
@@ -1388,21 +1512,11 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUn
     </div>
     <div className="pt-6 border-t" style={{ borderColor: 'var(--line-soft)' }}>
       {confirmDonar ? (
-        <div className="fade-up">
-          <p className="ff-serif italic text-sm mb-3 max-w-md" style={{ color: 'var(--ink-soft)' }}>
-            Donar «{cam.nombre}»: comparte una copia limpia —sin tu historia— que otra persona puede ponerse, y sale de tu clóset. Conservas los puntos que ganaste.
-          </p>
-          <div className="flex items-center gap-3 flex-wrap">
-            <button onClick={() => setSharing(true)} className="ff-mono text-xs ring-ink px-3 py-1 flex items-center gap-1.5"
-              style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>
-              <Share2 size={12} /><span>compartir copia</span>
-            </button>
-            <button onClick={() => onDonateCam()} className="ff-mono text-xs ring-ink px-3 py-1"
-              style={{ background: 'var(--accent)', color: 'var(--bg)' }}>donarla</button>
-            <button onClick={() => setConfirmDonar(false)} className="ff-mono text-xs ring-ink px-3 py-1"
-              style={{ color: 'var(--ink-faint)' }}>cancelar</button>
-          </div>
-        </div>
+        <DespedidaRitual cam={cam} movimientos={movimientos}
+          onDedicatoria={setDonateDed}
+          onShare={() => setSharing(true)}
+          onDonate={(ded) => onDonateCam(ded)}
+          onCancel={() => setConfirmDonar(false)} />
       ) : !cam.archived_at ? (
         confirmRetiro ? (
           <div className="flex items-center gap-3 fade-up">
@@ -1430,7 +1544,7 @@ function CamisetaDetail({ cam, onBack, onAddMision, onEditMision, onToggle, onUn
         </div>
       )}
     </div>
-    {sharing && <ShareSheet cam={cam} onClose={() => setSharing(false)} />}
+    {sharing && <ShareSheet cam={donateDed ? { ...cam, dedicatoria: donateDed } : cam} onClose={() => setSharing(false)} />}
   </div>);
 }
 
@@ -1503,12 +1617,12 @@ function ShareSheet({ cam, onClose }) {
     if (!moldeJSON) return;
     setBusy('share-text');
     try {
-      const text = `«${cam.nombre}» — molde del juego de las camisetas\n\n${moldeJSON}`;
+      const text = `Te comparto la camiseta «${cam.nombre}» del juego de las camisetas.\n\nPara recibirla: abre el juego → Recibir → "pegar texto", y pega TODO este mensaje (no hace falta recortar nada).\n\n${moldeJSON}`;
       if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
         await navigator.share({ title: cam.nombre, text });
       } else if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
-        setMsg({ kind: 'ok', text: 'texto copiado — pegalo donde quieras' });
+        setMsg({ kind: 'ok', text: 'texto copiado — pégalo donde quieras, completo' });
         return;
       } else {
         throw new Error('Tu sistema no permite compartir ni copiar texto.');
@@ -1833,6 +1947,12 @@ function ImportSheet({ onClose, onImport }) {
       {decoded.esencia && (
         <p className="ff-serif italic text-base mb-4" style={{ color: 'var(--ink-soft)' }}>{decoded.esencia}</p>
       )}
+      {decoded.dedicatoria && (
+        <div className="mb-4 py-3 px-4" style={{ borderLeft: '2px solid var(--accent-soft)', background: 'var(--bg-card)' }}>
+          <p className="ff-mono text-xs mb-1" style={{ color: 'var(--ink-faint)' }}>de quien la llevó antes:</p>
+          <p className="ff-serif italic text-base" style={{ color: 'var(--ink)' }}>«{decoded.dedicatoria}»</p>
+        </div>
+      )}
       {decoded.arco?.de && decoded.arco?.a && (
         <p className="ff-mono text-xs mb-4" style={{ color: 'var(--ink-faint)' }}>
           {decoded.arco.de} <span style={{ color: 'var(--gold)' }}>→</span> {decoded.arco.a}
@@ -2005,9 +2125,9 @@ function DiarioView({ state, onStart }) {
   const ult = (tipo) => state.sesiones.filter(s => s.tipo === tipo).slice(-1)[0];
   const fmt = (iso) => iso ? new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '—';
   const cards = [
-    { tipo: 'diaria',  titulo: 'Cierre del día',           cita: 'Lo que se hizo, lo que se nombra.',         tiempo: '1–2 min',   last: ult('diaria') },
-    { tipo: 'semanal', titulo: 'Cierre de semana',         cita: 'Las misiones se podan. Otras nacen.',       tiempo: '5–10 min',  last: ult('semanal') },
-    { tipo: 'mensual', titulo: 'El observador del observador', cita: 'No las misiones: el juego mismo.',     tiempo: '15–25 min', last: ult('mensual') },
+    { tipo: 'diaria',  titulo: 'Cierre del día',           cita: 'Lo que se hizo, lo que se nombra.',         ayuda: 'Marca qué misiones cumpliste hoy.',                                          tiempo: '1–2 min',   last: ult('diaria') },
+    { tipo: 'semanal', titulo: 'Cierre de semana',         cita: 'Las misiones se podan. Otras nacen.',       ayuda: 'Ajusta la dificultad de tus misiones, archiva las que ya no van y añade nuevas.', tiempo: '5–10 min',  last: ult('semanal') },
+    { tipo: 'mensual', titulo: 'El observador del observador', cita: 'No las misiones: el juego mismo.',     ayuda: 'Observa cómo te observas: qué vale la pena medir y cómo lo estás midiendo.',  tiempo: '15–25 min', last: ult('mensual') },
   ];
   return (<div className="fade-up">
     <p className="ff-serif italic text-lg mb-6" style={{ color: 'var(--ink-soft)' }}>El juego se construye aquí. La reflexión es parte del hacer.</p>
@@ -2020,6 +2140,7 @@ function DiarioView({ state, onStart }) {
             <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{c.tiempo}</span>
           </div>
           <p className="ff-serif italic text-sm mb-1" style={{ color: 'var(--ink-soft)' }}>{c.cita}</p>
+          <p className="ff-serif text-sm mb-2" style={{ color: 'var(--ink-soft)' }}>{c.ayuda}</p>
           <div className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>última · {fmt(c.last?.date)}</div>
         </button>
       ))}
@@ -2316,7 +2437,7 @@ function EventoItem({ e, cam, lookupCam }) {
       text = <>vuelve al mazo <strong>{e.nombre}</strong></>; break;
     case 'camiseta_donada':
       glyph = '◇'; color = 'var(--ink-faint)';
-      text = <>donada <em>{e.emoji} {e.nombre}</em> <span className="ff-mono text-xs ml-1" style={{ color: 'var(--ink-faint)' }}>· a otra percha</span></>; break;
+      text = <>donada <em>{e.emoji} {e.nombre}</em> <span className="ff-mono text-xs ml-1" style={{ color: 'var(--ink-faint)' }}>· a otra percha</span>{e.dedicatoria && <span className="ff-serif italic ml-1" style={{ color: 'var(--ink-soft)' }}> · «{e.dedicatoria}»</span>}</>; break;
     case 'camiseta_editada':
       glyph = '~'; color = 'var(--ink-faint)';
       text = <>editada <em>{e.nombre}</em></>; break;
@@ -2529,7 +2650,7 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
       return (<div className="fade-up">
         <div className="text-4xl mb-2">{cam.emoji}</div>
         <h2 className="display text-3xl mb-2">{cam.nombre}</h2>
-        <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Cada misión: ¿sigue viva, hay que apretarla, o ya no?</p>
+        <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Cada misión: ¿sigue viva, le subes o le bajas la dificultad, o ya cumplió su ciclo?</p>
         <div className="space-y-2 mb-6">
           {activas.length === 0 && <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Sin misiones activas.</p>}
           {activas.map(m => (
@@ -2651,7 +2772,7 @@ function NavButtons({ onBack, onNext }) {
   </div>);
 }
 
-function SesionMensual({ cams, onArchiveCam, onReviveCam, onCreateCam, onClose }) {
+function SesionMensual({ cams, onArchiveCam, onReviveCam, onDonateCam, onCreateCam, onClose }) {
   const [step, setStep] = useState(0);
   const [sentir, setSentir] = useState('');
   const [regla, setRegla] = useState('');
@@ -2675,17 +2796,23 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onCreateCam, onClose }
     <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{step + 1} / 5</div>
     {step === 0 && (<div className="fade-up">
       <h2 className="display text-3xl mb-2">El mazo.</h2>
-      <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>¿Sigue cada camiseta siendo verdadera para ti? Retira sin culpa lo que ya no.</p>
+      <p className="ff-serif italic mb-2" style={{ color: 'var(--ink-soft)' }}>¿Sigue cada camiseta siendo pertinente para ti?</p>
+      <p className="ff-serif text-sm mb-6" style={{ color: 'var(--ink-soft)' }}>
+        Pertinente: que todavía tiene sentido para quien eres hoy. Si alguna ya no, puedes <strong>guardarla en el closet</strong> (la recuperas cuando quieras) o <strong>donarla</strong> (sale de tu mazo y queda para otra persona; conservas tus puntos).
+      </p>
       <div className="space-y-2 mb-8">
         {activas.map(c => (
           <div key={c.id} className="flex items-center gap-3 py-2">
             <span className="text-2xl">{c.emoji}</span>
             <span className="flex-1 ff-serif text-lg">{c.nombre}</span>
-            <button onClick={() => { if (confirm(`¿Retirar "${c.nombre}"?`)) onArchiveCam(c.id); }} className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>retirar</button>
+            <button onClick={() => { if (confirm(`¿Guardar "${c.nombre}" en el closet? La puedes recuperar después.`)) onArchiveCam(c.id); }} className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-soft)', border: '1px solid var(--line)' }}>al closet</button>
+            {onDonateCam && (
+              <button onClick={() => { if (confirm(`¿Donar "${c.nombre}"? Sale de tu mazo para siempre y queda disponible para otra persona. Conservas tus puntos.`)) onDonateCam(c.id); }} className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--accent)', border: '1px solid var(--accent-soft)' }}>donar</button>
+            )}
           </div>
         ))}
         {cams.filter(c => c.archived_at).length > 0 && (<details className="pt-4">
-          <summary className="smallcaps cursor-pointer" style={{ color: 'var(--ink-faint)' }}>recuperar alguna</summary>
+          <summary className="smallcaps cursor-pointer" style={{ color: 'var(--ink-faint)' }}>recuperar del closet</summary>
           <div className="mt-2 space-y-1">
             {cams.filter(c => c.archived_at).map(c => (
               <div key={c.id} className="flex items-center gap-3 py-1">
