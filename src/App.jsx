@@ -1,9 +1,19 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter } from 'lucide-react';
+import { Plus, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home } from 'lucide-react';
 import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encodeCamisetaToJSON, decodeJSONToCamiseta } from './codec/index.js';
 
 const STATE_KEY = 'juego-camisetas:state:v1';
+const INSTALL_KEY = 'juego-camisetas:install-ack:v1';
 const DAY = 86400000;
+
+// ¿Está corriendo ya instalada (desde el ícono del home), no en el navegador?
+function isStandalone() {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.matchMedia?.('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true   // iOS Safari
+  );
+}
 
 const emptyState = {
   user_id: 'local', version: 6, created_at: new Date().toISOString(),
@@ -301,6 +311,29 @@ export default function App() {
   const [sesion, setSesion] = useState(null);
   const [showNota, setShowNota] = useState(false);  // hoja de nota rápida (global)
 
+  // Instructivo de instalación: se muestra de primeras si NO está instalada
+  // y el usuario no lo ha cerrado antes. Una vez abierta desde el ícono
+  // (standalone), isStandalone() es true y nunca vuelve a aparecer.
+  const [installAck, setInstallAck] = useState(() => {
+    if (isStandalone()) return true;
+    try { return localStorage.getItem(INSTALL_KEY) === '1'; } catch { return false; }
+  });
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const ackInstall = () => {
+    try { localStorage.setItem(INSTALL_KEY, '1'); } catch {}
+    setInstallAck(true);
+  };
+  useEffect(() => {
+    const onPrompt = (e) => { e.preventDefault(); setDeferredPrompt(e); };
+    const onInstalled = () => ackInstall();
+    window.addEventListener('beforeinstallprompt', onPrompt);
+    window.addEventListener('appinstalled', onInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onPrompt);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
+  }, []);
+
   useEffect(() => { loadState().then(setState); }, []);
   useEffect(() => {
     if (!state) return;
@@ -581,6 +614,23 @@ export default function App() {
   const camsActivas = state.camisetas.filter(c => !c.archived_at);
   const puntosUser = puntosTotales(state.movimientos);
 
+  // Instructivo de instalación: lo primero que ve un usuario nuevo.
+  // Se salta si ya está instalada (standalone) o si ya lo cerró antes.
+  if (!installAck && !isStandalone()) {
+    return <Frame><InstallGate
+      deferredPrompt={deferredPrompt}
+      onInstall={async () => {
+        if (!deferredPrompt) return;
+        try {
+          deferredPrompt.prompt();
+          await deferredPrompt.userChoice;
+        } catch {}
+        setDeferredPrompt(null);
+      }}
+      onContinue={ackInstall}
+    /></Frame>;
+  }
+
   // Bienvenida: primera vez sin camisetas y sin haber decidido aún
   if (state.camisetas.length === 0 && !showCreate && !showCatalogo && !showImport) {
     return <Frame><Welcome onCatalogo={() => setShowCatalogo(true)} onCrear={() => setShowCreate(true)} onImport={() => setShowImport(true)} /></Frame>;
@@ -687,9 +737,9 @@ function QuickNoteSheet({ onClose, onSave }) {
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 fade-up"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
       style={{ background: 'rgba(28, 24, 19, 0.55)' }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md"
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md my-auto max-h-[90vh] overflow-y-auto"
         style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
         <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '1px solid var(--line-soft)' }}>
           <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Una nota</span>
@@ -786,6 +836,76 @@ function TabBar({ tab, setTab }) {
       ))}
     </div>
   </nav>);
+}
+
+function InstallGate({ deferredPrompt, onInstall, onContinue }) {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  const isIOS = /iphone|ipad|ipod/i.test(ua) ||
+    (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = /android/i.test(ua);
+
+  // Pasos por plataforma. Cada paso: { icon, texto }.
+  let pasos;
+  if (isIOS) {
+    pasos = [
+      { icon: <Share2 size={18} strokeWidth={1.6} />, texto: <>Toca el botón <strong>Compartir</strong> en la barra de Safari (el cuadro con la flecha hacia arriba).</> },
+      { icon: <Plus size={18} strokeWidth={1.6} />, texto: <>Elige <strong>«Añadir a pantalla de inicio»</strong>.</> },
+      { icon: <Check size={18} strokeWidth={1.6} />, texto: <>Confirma con <strong>«Añadir»</strong>.</> },
+    ];
+  } else if (isAndroid) {
+    pasos = [
+      { icon: <MoreVertical size={18} strokeWidth={1.6} />, texto: <>Toca el menú <strong>⋮</strong> arriba a la derecha del navegador.</> },
+      { icon: <Download size={18} strokeWidth={1.6} />, texto: <>Elige <strong>«Instalar app»</strong> o <strong>«Añadir a pantalla principal»</strong>.</> },
+      { icon: <Check size={18} strokeWidth={1.6} />, texto: <>Confirma <strong>«Instalar»</strong>.</> },
+    ];
+  } else {
+    pasos = [
+      { icon: <Download size={18} strokeWidth={1.6} />, texto: <>En el menú del navegador busca <strong>«Instalar»</strong> o <strong>«Añadir a pantalla de inicio»</strong>.</> },
+      { icon: <Check size={18} strokeWidth={1.6} />, texto: <>Confirma para crear el ícono.</> },
+    ];
+  }
+
+  return (<div className="min-h-screen flex flex-col justify-center items-center px-8 max-w-xl mx-auto text-center fade-up">
+    <div className="smallcaps mb-6" style={{ color: 'var(--ink-faint)' }}>Antes de empezar</div>
+    <Smartphone size={40} strokeWidth={1.3} className="mb-5" style={{ color: 'var(--ink-soft)' }} />
+    <h1 className="display text-4xl md:text-5xl leading-[1.05] mb-4">
+      Ponla en tu pantalla de inicio
+    </h1>
+    <p className="ff-serif text-base mb-10 max-w-md" style={{ color: 'var(--ink-soft)' }}>
+      El juego vive mejor como app: a pantalla completa, sin la barra del navegador, lista de un toque. Instálala antes de jugar.
+    </p>
+
+    {deferredPrompt && (
+      <button onClick={onInstall}
+        className="ff-serif text-base px-8 py-3 mb-6 ring-ink flex items-center gap-2"
+        style={{ background: 'var(--ink)', color: 'var(--bg)' }}>
+        <Download size={16} /> Instalar app
+      </button>
+    )}
+
+    <div className="w-full max-w-sm text-left mb-10">
+      {pasos.map((p, i) => (
+        <div key={i} className="flex items-start gap-3 mb-4">
+          <span className="ff-mono text-xs mt-0.5 shrink-0 w-5 text-center" style={{ color: 'var(--ink-faint)' }}>{i + 1}</span>
+          <span className="shrink-0 mt-0.5" style={{ color: 'var(--ink-soft)' }}>{p.icon}</span>
+          <span className="ff-serif text-sm" style={{ color: 'var(--ink-soft)' }}>{p.texto}</span>
+        </div>
+      ))}
+    </div>
+
+    <div className="flex items-center gap-2 mb-10 ff-serif text-base italic px-4" style={{ color: 'var(--ink)' }}>
+      <Home size={16} strokeWidth={1.6} style={{ color: 'var(--accent)' }} />
+      <span>Luego cierra esta ventana y ábrela desde el ícono nuevo.</span>
+    </div>
+
+    <button onClick={onContinue} className="ff-serif text-base px-8 py-3 mb-2 ring-ink"
+      style={{ border: '1px solid var(--line)', color: 'var(--ink)' }}>
+      Ya la instalé · entrar
+    </button>
+    <button onClick={onContinue} className="ff-mono text-xs ring-ink py-2 px-3" style={{ color: 'var(--ink-faint)' }}>
+      o seguir en el navegador
+    </button>
+  </div>);
 }
 
 function Welcome({ onCatalogo, onCrear, onImport }) {
@@ -1639,12 +1759,14 @@ function ShareSheet({ cam, onClose }) {
     if (!moldeJSON) return;
     setBusy('share-text');
     try {
-      const text = `Te comparto la camiseta «${cam.nombre}» del juego de las camisetas.\n\nPara recibirla: abre el juego → Recibir → "pegar texto", y pega TODO este mensaje (no hace falta recortar nada).\n\n${moldeJSON}`;
+      // Solo viaja el JSON limpio. Quien recibe lo pega tal cual en
+      // Recibir → "pegar texto"; el decoder acepta el molde sin recortes.
+      const text = moldeJSON;
       if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
         await navigator.share({ title: cam.nombre, text });
       } else if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
-        setMsg({ kind: 'ok', text: 'texto copiado — pégalo donde quieras, completo' });
+        setMsg({ kind: 'ok', text: 'molde copiado — pégalo donde quieras' });
         return;
       } else {
         throw new Error('Tu sistema no permite compartir ni copiar texto.');
@@ -1721,10 +1843,10 @@ function ShareSheet({ cam, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 fade-up"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
       style={{ background: 'rgba(28, 24, 19, 0.55)' }}
       onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md"
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md my-auto max-h-[90vh] overflow-y-auto"
         style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
         <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '1px solid var(--line-soft)' }}>
           <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Compartir el diseño</span>
@@ -2372,6 +2494,7 @@ function Historia({ state }) {
   // (or 'todos') to clear. Default = show everything.
   const CATS = [
     { id: 'cierres',    label: 'cierres',   match: (e) => e.tipo.startsWith('sesion_') },
+    { id: 'notas',      label: 'notas',     match: (e) => e.tipo === 'nota' },
     { id: 'camisetas',  label: 'camisetas', match: (e) => e.tipo.startsWith('camiseta_') },
     { id: 'misiones',   label: 'misiones',  match: (e) => e.tipo.startsWith('mision_') },
     { id: 'milestones', label: 'hitos',     match: (e) => e.tipo.startsWith('milestone_') },
