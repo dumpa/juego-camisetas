@@ -4,6 +4,11 @@ import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encode
 
 const STATE_KEY = 'juego-camisetas:state:v1';
 const INSTALL_KEY = 'juego-camisetas:install-ack:v1';
+// v7: respaldos automáticos. PRE_V7 congela el estado crudo la primera vez
+// que corre la migración v7 (una sola vez, nunca se sobrescribe).
+// IMPORT_BACKUP guarda lo que había antes de cada import manual.
+const BACKUP_PRE_V7_KEY = 'juego-camisetas:state:pre-v7';
+const IMPORT_BACKUP_KEY = 'juego-camisetas:state:import-backup';
 const DAY = 86400000;
 
 // ¿Está corriendo ya instalada (desde el ícono del home), no en el navegador?
@@ -15,22 +20,46 @@ function isStandalone() {
   );
 }
 
-const emptyState = {
-  user_id: 'local', version: 6, created_at: new Date().toISOString(),
-  camisetas: [], sesiones: [], eventos: [], movimientos: [],
-};
+const emptyState = () => ({
+  user_id: 'local', version: 7, created_at: new Date().toISOString(),
+  camisetas: [], sesiones: [], eventos: [], movimientos: [], visitas: [],
+});
 
 async function loadState() {
   try {
     const raw = localStorage.getItem(STATE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return migrate(parsed);
+      // v7: antes de migrar por primera vez, congelar el estado crudo tal
+      // cual estaba. Si la migración algún día resulta tener un bug, el
+      // original sigue intacto en este key.
+      try {
+        if ((parsed.version || 0) < 7 && !localStorage.getItem(BACKUP_PRE_V7_KEY)) {
+          localStorage.setItem(BACKUP_PRE_V7_KEY, raw);
+        }
+      } catch {}
+      const s = migrate(parsed);
+      registrarVisita(s);
+      return s;
     }
   } catch (e) {
     console.error('loadState error:', e);
   }
-  return emptyState;
+  const s = emptyState();
+  registrarVisita(s);
+  return s;
+}
+
+// v7: registro de aperturas. Se guardan TODAS (el patrón de hora del día
+// distingue al jefe del hacedor), con dos economías: precisión al minuto
+// (el segundo no aporta) y filtro de ráfaga (cerrar/reabrir en <10 min es
+// una sola entrada conceptual). Devuelve true si registró.
+function registrarVisita(s) {
+  if (!s.visitas) s.visitas = [];
+  const ultima = s.visitas[s.visitas.length - 1]?.ts;
+  if (ultima && (Date.now() - new Date(ultima).getTime()) < 10 * 60 * 1000) return false;
+  s.visitas.push({ ts: nowISO().slice(0, 16) + 'Z' });
+  return true;
 }
 async function saveState(state) {
   try {
@@ -128,7 +157,43 @@ function migrate(s) {
       });
     });
   }
-  s.version = 6;
+  // v7 — capa de escritura para el eco (aditiva, cero lectura):
+  //   · s.visitas[]: registro de aperturas del app
+  //   · un evento 'snapshot' (baseline: true) por camiseta existente:
+  //     congela los textos de HOY como historia consultable aunque se
+  //     editen mañana. baseline = "así estaba en la migración", no
+  //     "escrito ese día" — el eco no debe fabricar recuerdos falsos.
+  //   · sesiones viejas en eventos: resolver caliente/fria a nombre
+  //     mientras la camiseta todavía exista para hacer el lookup.
+  if (s.version < 7) {
+    if (!s.visitas) s.visitas = [];
+    const ts = nowISO();
+    s.camisetas?.forEach(cam => {
+      s.eventos.push({
+        id: uid(), ts, baseline: true, tipo: 'snapshot',
+        cam_id: cam.id, nombre: cam.nombre, emoji: cam.emoji,
+        esencia: cam.esencia ?? '', arco: cam.arco ?? null,
+        misiones: (cam.misiones || []).map(m => ({
+          id: m.id, nombre: m.nombre, forma: m.forma, tonos: m.tonos || [],
+          puntos_base: m.puntos_base, estado: m.estado ?? (m.completed_at ? 'hecha' : 'activa'),
+        })),
+        milestones: (cam.milestones || []).map(ms => ({
+          id: ms.id, nombre: ms.nombre, descripcion: ms.descripcion ?? '',
+          regalo: ms.regalo ?? '', estado: ms.estado,
+        })),
+      });
+    });
+    s.eventos?.forEach(e => {
+      if (!e.tipo?.startsWith('sesion_')) return;
+      if (e.caliente && e.caliente_nombre === undefined) {
+        e.caliente_nombre = s.camisetas?.find(c => c.id === e.caliente)?.nombre ?? null;
+      }
+      if (e.fria && e.fria_nombre === undefined) {
+        e.fria_nombre = s.camisetas?.find(c => c.id === e.fria)?.nombre ?? null;
+      }
+    });
+  }
+  s.version = 7;
   return s;
 }
 
@@ -335,6 +400,23 @@ export default function App() {
   }, []);
 
   useEffect(() => { loadState().then(setState); }, []);
+  // v7: registrar cuando el app "vuelve" sin recargar (la PWA puede quedar
+  // viva en background días, sobre todo en iOS: reabrir desde el ícono sin
+  // cold start no pasa por loadState). El filtro de 10 min en
+  // registrarVisita evita duplicados; si no registró, devolvemos prev para
+  // no disparar un ciclo de guardado inútil.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      setState(prev => {
+        if (!prev) return prev;
+        const n = structuredClone(prev);
+        return registrarVisita(n) ? n : prev;
+      });
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
   useEffect(() => {
     if (!state) return;
     saveState(state).then(ok => {
@@ -349,7 +431,7 @@ export default function App() {
   const addCamiseta = (data) => update(s => {
     const id = uid();
     s.camisetas.push({ id, ...data, creador_id: s.user_id, origen: 'propia', origen_camiseta_id: null, precio: null, created_at: nowISO(), archived_at: null, misiones: [], milestones: [] });
-    pushEv(s, { tipo: 'camiseta_creada', cam_id: id, nombre: data.nombre, emoji: data.emoji });
+    pushEv(s, { tipo: 'camiseta_creada', cam_id: id, nombre: data.nombre, emoji: data.emoji, esencia: data.esencia ?? '', arco: data.arco ?? null });
   });
   const recibirCamiseta = (molde) => {
     // molde is the decoded camiseta object from decodeImageToCamiseta (mode='molde').
@@ -455,14 +537,20 @@ export default function App() {
     const c = s.camisetas.find(c => c.id === id);
     if (!c) return;
     const ded = (dedicatoria || '').trim();
-    pushEv(s, { tipo: 'camiseta_donada', cam_id: id, nombre: c.nombre, emoji: c.emoji, dedicatoria: ded || undefined });
+    // v7: la camiseta sale del array — el snapshot conserva sus textos y estado.
+    pushEv(s, { tipo: 'camiseta_donada', cam_id: id, nombre: c.nombre, emoji: c.emoji, dedicatoria: ded || undefined,
+      snapshot: { esencia: c.esencia ?? '', arco: c.arco ?? null,
+        misiones: (c.misiones || []).map(m => ({ id: m.id, nombre: m.nombre, forma: m.forma, estado: m.estado, completions: [...(m.completions || [])] })),
+        milestones: (c.milestones || []).map(ms => ({ id: ms.id, nombre: ms.nombre, regalo: ms.regalo ?? '', estado: ms.estado })) } });
     s.camisetas = s.camisetas.filter(x => x.id !== id);
   });
   const editCamiseta = (id, data) => update(s => {
     const c = s.camisetas.find(c => c.id === id);
     if (!c) return;
+    // v7: snapshot ANTES del assign — lo que cambia deja rastro.
+    const antes = { nombre: c.nombre, emoji: c.emoji, esencia: c.esencia ?? '', arco: c.arco ?? null };
     Object.assign(c, data);
-    pushEv(s, { tipo: 'camiseta_editada', cam_id: id, nombre: c.nombre });
+    pushEv(s, { tipo: 'camiseta_editada', cam_id: id, nombre: c.nombre, antes });
   });
   const addMision = (camId, data) => update(s => {
     const c = s.camisetas.find(c => c.id === camId);
@@ -480,8 +568,10 @@ export default function App() {
   const editMision = (camId, misId, data) => update(s => {
     const m = s.camisetas.find(c => c.id === camId)?.misiones.find(m => m.id === misId);
     if (!m) return;
+    // v7: snapshot ANTES del assign.
+    const antes = { nombre: m.nombre, forma: m.forma, tonos: [...(m.tonos || [])], puntos_base: m.puntos_base };
     Object.assign(m, data);
-    pushEv(s, { tipo: 'mision_editada', cam_id: camId, mision_id: misId, nombre: m.nombre });
+    pushEv(s, { tipo: 'mision_editada', cam_id: camId, mision_id: misId, nombre: m.nombre, antes });
   });
   const toggleMision = (camId, misId) => update(s => {
     const c = s.camisetas.find(c => c.id === camId);
@@ -511,6 +601,9 @@ export default function App() {
             s.movimientos.splice(i, 1); break;
           }
         }
+        // v7: el diario registra el deshacer en vez de fingir que no pasó.
+        // El evento mision_completada previo queda; este lo compensa.
+        pushEv(s, { tipo: 'mision_descompletada', cam_id: camId, mision_id: misId, nombre: m.nombre });
       }
     }
   });
@@ -520,7 +613,10 @@ export default function App() {
   });
   const reviveMision = (camId, misId) => update(s => {
     const m = s.camisetas.find(c => c.id === camId)?.misiones.find(m => m.id === misId);
-    if (m) { m.estado = 'activa'; m.archived_at = null; m.completed_at = null; }
+    if (!m) return;
+    // v7: revivir borra completed_at — el evento conserva lo que había.
+    pushEv(s, { tipo: 'mision_revivida', cam_id: camId, mision_id: misId, nombre: m.nombre, antes: { estado: m.estado, completed_at: m.completed_at ?? null } });
+    m.estado = 'activa'; m.archived_at = null; m.completed_at = null;
   });
   const deleteMision = (camId, misId) => update(s => {
     const c = s.camisetas.find(c => c.id === camId);
@@ -528,29 +624,44 @@ export default function App() {
     const m = c.misiones.find(m => m.id === misId);
     c.misiones = c.misiones.filter(m => m.id !== misId);
     // El ledger es historia: los puntos ya ganados se conservan; solo desaparece la misión.
-    if (m) pushEv(s, { tipo: 'mision_borrada', cam_id: camId, mision_id: misId, nombre: m.nombre });
+    // v7: borrar destruía completions[]; el snapshot las conserva en el diario.
+    if (m) pushEv(s, { tipo: 'mision_borrada', cam_id: camId, mision_id: misId, nombre: m.nombre,
+      snapshot: { forma: m.forma, tonos: m.tonos || [], puntos_base: m.puntos_base, estado: m.estado,
+        created_at: m.created_at ?? null, completed_at: m.completed_at ?? null, completions: [...(m.completions || [])] } });
   });
   const ajustarDif = (camId, misId, d) => update(s => {
     const m = s.camisetas.find(c => c.id === camId)?.misiones.find(m => m.id === misId);
-    if (m) m.puntos_base = Math.max(1, Math.min(10, (m.puntos_base || 1) + d));
+    if (!m) return;
+    const de = m.puntos_base || 1;
+    m.puntos_base = Math.max(1, Math.min(10, de + d));
+    // v7: el cambio de dificultad era mudo; ahora deja rastro.
+    if (m.puntos_base !== de) pushEv(s, { tipo: 'mision_ajustada', cam_id: camId, mision_id: misId, nombre: m.nombre, de, a: m.puntos_base });
   });
   const cambiarForma = (camId, misId, forma) => update(s => {
     const m = s.camisetas.find(c => c.id === camId)?.misiones.find(m => m.id === misId);
-    if (m) { m.forma = forma; if (forma === 'recurrente' && m.estado === 'hecha') { m.estado = 'activa'; m.completed_at = null; } }
+    if (!m) return;
+    const de = m.forma;
+    m.forma = forma;
+    if (forma === 'recurrente' && m.estado === 'hecha') {
+      m.estado = 'activa'; m.completed_at = null;
+      // v7: este reset también era mudo.
+      pushEv(s, { tipo: 'mision_descompletada', cam_id: camId, mision_id: misId, nombre: m.nombre, causa: 'cambio_forma' });
+    }
+    if (de !== forma) pushEv(s, { tipo: 'mision_forma', cam_id: camId, mision_id: misId, nombre: m.nombre, de, a: forma });
   });
   const addMilestone = (camId, data) => update(s => {
     const c = s.camisetas.find(c => c.id === camId);
     if (c) {
       const id = uid();
       c.milestones.push({ id, ...data, estado: 'pendiente', created_at: nowISO(), achieved_at: null });
-      pushEv(s, { tipo: 'milestone_creado', cam_id: camId, ms_id: id, nombre: data.nombre });
+      pushEv(s, { tipo: 'milestone_creado', cam_id: camId, ms_id: id, nombre: data.nombre, descripcion: data.descripcion ?? '', regalo: data.regalo ?? '' });
     }
   });
   const toggleMilestone = (camId, msId) => update(s => {
     const ms = s.camisetas.find(c => c.id === camId)?.milestones.find(m => m.id === msId);
     if (!ms) return;
     if (ms.estado === 'pendiente') { ms.estado = 'logrado'; ms.achieved_at = nowISO(); pushEv(s, { tipo: 'milestone_logrado', cam_id: camId, ms_id: msId, nombre: ms.nombre, regalo: ms.regalo }); }
-    else if (ms.estado === 'logrado') { ms.estado = 'pendiente'; ms.achieved_at = null; }
+    else if (ms.estado === 'logrado') { ms.estado = 'pendiente'; ms.achieved_at = null; pushEv(s, { tipo: 'milestone_deslogrado', cam_id: camId, ms_id: msId, nombre: ms.nombre }); }
   });
   const cobrarMilestone = (camId, msId) => update(s => {
     const ms = s.camisetas.find(c => c.id === camId)?.milestones.find(m => m.id === msId);
@@ -561,8 +672,10 @@ export default function App() {
   const editMilestone = (camId, msId, data) => update(s => {
     const ms = s.camisetas.find(c => c.id === camId)?.milestones.find(m => m.id === msId);
     if (!ms) return;
+    // v7: snapshot ANTES del assign — el regalo reescrito no se pierde.
+    const antes = { nombre: ms.nombre, descripcion: ms.descripcion ?? '', regalo: ms.regalo ?? '' };
     Object.assign(ms, data);
-    pushEv(s, { tipo: 'milestone_editado', cam_id: camId, ms_id: msId, nombre: ms.nombre });
+    pushEv(s, { tipo: 'milestone_editado', cam_id: camId, ms_id: msId, nombre: ms.nombre, antes });
   });
   // Restar una completion de una misión recurrente. Pensado para deshacer
   // un tap accidental. Saca la última completion y elimina el último movimiento
@@ -579,6 +692,8 @@ export default function App() {
         break;
       }
     }
+    // v7: el deshacer queda registrado (compensa el mision_completada previo).
+    pushEv(s, { tipo: 'mision_descompletada', cam_id: camId, mision_id: misId, nombre: m.nombre, causa: 'undo' });
   });
   // Move a camiseta up/down in the persistent order. dir = -1 (up) | +1 (down).
   // We move within the full s.camisetas array so it works whether the camiseta
@@ -599,7 +714,13 @@ export default function App() {
     // last was the original bug — it left e.tipo as 'diaria' instead of
     // 'sesion_diaria', breaking the EventoItem switch + cierres filter +
     // accordion. The v5 migration fixes legacy events on load.
-    pushEv(s, { ...data, tipo: `sesion_${data.tipo}`, sesion_id: id, notas: data.notas });
+    // v7: snapshot de nombres al escribir — el cam_id deja de resolver si
+    // la camiseta se dona o borra después.
+    const nom = (camId) => s.camisetas.find(c => c.id === camId)?.nombre ?? null;
+    const extra = {};
+    if (data.caliente) extra.caliente_nombre = nom(data.caliente);
+    if (data.fria) extra.fria_nombre = nom(data.fria);
+    pushEv(s, { ...data, ...extra, tipo: `sesion_${data.tipo}`, sesion_id: id, notas: data.notas });
   });
 
   // Nota rápida: capturar un pensamiento suelto sin hacer un check-in completo.
@@ -2340,6 +2461,10 @@ function BackupTools({ state }) {
       if (!txt) return;
       const parsed = JSON.parse(txt);
       if (!parsed.camisetas) throw new Error('formato inválido');
+      // v7: respaldar lo que hay antes de pisarlo. Un pegado equivocado
+      // deja de ser pérdida total silenciosa.
+      const actual = localStorage.getItem(STATE_KEY);
+      if (actual) localStorage.setItem(IMPORT_BACKUP_KEY, actual);
       // reemplazar storage directamente y recargar
       localStorage.setItem(STATE_KEY, JSON.stringify(parsed));
       setEstado('importado');
@@ -2517,7 +2642,7 @@ function Historia({ state }) {
   ];
   const [filter, setFilter] = useState(null);
 
-  const allEvents = [...(state.eventos || [])].reverse();
+  const allEvents = (state.eventos || []).filter(e => !TIPOS_SILENCIOSOS.has(e.tipo)).reverse();
   if (allEvents.length === 0) return <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Aún no hay nada que contar. La historia empieza con la primera misión.</p>;
 
   const filtered = filter
@@ -2575,6 +2700,13 @@ function Historia({ state }) {
     )}
   </div>);
 }
+
+// v7: eventos de la capa de escritura que todavía no tienen voz en la UI.
+// Se registran para el eco; la historia no los muestra (release invisible).
+const TIPOS_SILENCIOSOS = new Set([
+  'snapshot', 'mision_descompletada', 'mision_ajustada', 'mision_forma',
+  'mision_revivida', 'milestone_deslogrado',
+]);
 
 function EventoItem({ e, cam, lookupCam }) {
   const [expanded, setExpanded] = useState(false);
