@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home } from 'lucide-react';
+import { Plus, Check, X, GripVertical, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home } from 'lucide-react';
 import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encodeCamisetaToJSON, decodeJSONToCamiseta } from './codec/index.js';
 
 const STATE_KEY = 'juego-camisetas:state:v1';
@@ -8,8 +8,24 @@ const INSTALL_KEY = 'juego-camisetas:install-ack:v1';
 // que corre la migración v7 (una sola vez, nunca se sobrescribe).
 // IMPORT_BACKUP guarda lo que había antes de cada import manual.
 const BACKUP_PRE_V7_KEY = 'juego-camisetas:state:pre-v7';
+const BACKUP_PRE_V8_KEY = 'juego-camisetas:state:pre-v8';
 const IMPORT_BACKUP_KEY = 'juego-camisetas:state:import-backup';
 const DAY = 86400000;
+
+// ── v8: el clóset es un mueble ───────────────────────────────────────────
+// Cinco ganchos fijos (no configurables, a propósito: en el momento en que
+// sea un ajuste alguien lo sube a veinte) y cerros ilimitados. Cada camiseta
+// está en exactamente un sitio.
+const GANCHOS = 5;
+const CERRO_SIN_DOBLAR = 'sin-doblar';
+const cerroSistema = () => ({ id: CERRO_SIN_DOBLAR, nombre: 'sin doblar', orden: 0, esDelSistema: true });
+const PUESTA = () => ({ tipo: 'puesta' });
+const AL_SIN_DOBLAR = () => ({ tipo: 'cerro', cerroId: CERRO_SIN_DOBLAR });
+const estaPuesta = (c) => c?.ubicacion?.tipo === 'puesta';
+const enGancho = (c, i) => c?.ubicacion?.tipo === 'gancho' && c.ubicacion.posicion === i;
+const enCerro = (c, id) => c?.ubicacion?.tipo === 'cerro' && c.ubicacion.cerroId === id;
+const mismaUbicacion = (a, b) => !!a && !!b && a.tipo === b.tipo &&
+  a.posicion === b.posicion && a.cerroId === b.cerroId;
 
 // ¿Está corriendo ya instalada (desde el ícono del home), no en el navegador?
 function isStandalone() {
@@ -21,8 +37,9 @@ function isStandalone() {
 }
 
 const emptyState = () => ({
-  user_id: 'local', version: 7, created_at: new Date().toISOString(),
+  user_id: 'local', version: 8, created_at: new Date().toISOString(),
   camisetas: [], sesiones: [], eventos: [], movimientos: [], visitas: [],
+  cerros: [cerroSistema()],
 });
 
 async function loadState() {
@@ -36,6 +53,10 @@ async function loadState() {
       try {
         if ((parsed.version || 0) < 7 && !localStorage.getItem(BACKUP_PRE_V7_KEY)) {
           localStorage.setItem(BACKUP_PRE_V7_KEY, raw);
+        }
+        // v8: mismo seguro antes de repartir las camisetas por el mueble.
+        if ((parsed.version || 0) < 8 && !localStorage.getItem(BACKUP_PRE_V8_KEY)) {
+          localStorage.setItem(BACKUP_PRE_V8_KEY, raw);
         }
       } catch {}
       const s = migrate(parsed);
@@ -193,8 +214,91 @@ function migrate(s) {
       }
     });
   }
-  s.version = 7;
+  // v8 — el clóset deja de ser una lista y pasa a ser un mueble:
+  //   · s.cerros[]: montones con nombre. Uno del sistema, 'sin doblar',
+  //     que no se borra ni se renombra.
+  //   · cada camiseta gana ubicacion: puesta | gancho(0..4) | cerro(id).
+  // Va sin candado de versión y a propósito: no asume nada, valida lo que
+  // encuentra y solo escribe lo que falta o quedó inválido. Correrla dos
+  // veces no mueve una sola camiseta. Al salir de aquí ninguna camiseta
+  // puede quedar sin ubicación.
+  if (!Array.isArray(s.cerros)) s.cerros = [];
+  if (!s.cerros.some(c => c.id === CERRO_SIN_DOBLAR)) s.cerros.unshift(cerroSistema());
+  s.cerros.forEach((c, i) => {
+    if (typeof c.orden !== 'number') c.orden = i;
+    if (typeof c.esDelSistema !== 'boolean') c.esDelSistema = c.id === CERRO_SIN_DOBLAR;
+    if (c.id === CERRO_SIN_DOBLAR) c.esDelSistema = true;
+  });
+  {
+    const idsCerro = new Set(s.cerros.map(c => c.id));
+    const ganchoTomado = new Set();
+    s.camisetas?.forEach(cam => {
+      const u = cam.ubicacion;
+      let valida = false;
+      if (u?.tipo === 'puesta') valida = true;
+      else if (u?.tipo === 'gancho' && Number.isInteger(u.posicion) &&
+               u.posicion >= 0 && u.posicion < GANCHOS && !ganchoTomado.has(u.posicion)) {
+        ganchoTomado.add(u.posicion); valida = true;
+      } else if (u?.tipo === 'cerro' && idsCerro.has(u.cerroId)) valida = true;
+      // Primera corrida: lo que está archivado cae al cerro sin doblar, lo
+      // puesto sigue puesto, los cinco ganchos arrancan vacíos. Las donadas
+      // ya no están en el array, así que no se tocan.
+      if (!valida) cam.ubicacion = cam.archived_at ? AL_SIN_DOBLAR() : PUESTA();
+    });
+  }
+  s.version = 8;
   return s;
+}
+
+// Escribe un evento en la historia. Módulo, no closure: lo usan tanto los
+// handlers de App como aplicarMovida.
+const pushEvento = (s, ev) => { s.eventos.push({ id: uid(), ts: nowISO(), ...ev }); };
+
+// Una ubicación que existe de verdad. Un gancho fuera de rango o un cerro
+// borrado no dejan a la camiseta en el aire: caen al cerro sin doblar.
+function normalizarUbicacion(s, u) {
+  if (u?.tipo === 'puesta') return PUESTA();
+  if (u?.tipo === 'gancho' && Number.isInteger(u.posicion) && u.posicion >= 0 && u.posicion < GANCHOS) {
+    return { tipo: 'gancho', posicion: u.posicion };
+  }
+  if (u?.tipo === 'cerro' && s.cerros?.some(c => c.id === u.cerroId)) {
+    return { tipo: 'cerro', cerroId: u.cerroId };
+  }
+  return AL_SIN_DOBLAR();
+}
+
+// El único camino por el que una camiseta cambia de sitio. Guardar a mano,
+// arrastrar y lavar la ropa pasan todos por aquí: un solo camino, no dos.
+function aplicarMovida(s, camId, destino, opts = {}) {
+  const c = s.camisetas.find(x => x.id === camId);
+  if (!c) return false;
+  const antes = c.ubicacion;
+  const dest = normalizarUbicacion(s, destino);
+  if (mismaUbicacion(antes, dest)) return false;
+  // En un gancho no caben dos. Si la que llega venía de otro gancho, los dos
+  // se intercambian —eso es reordenar los ganchos entre sí—; si venía de
+  // fuera, la que estaba baja al cerro sin doblar.
+  if (dest.tipo === 'gancho') {
+    const ocupante = s.camisetas.find(x => x.id !== camId && enGancho(x, dest.posicion));
+    if (ocupante) {
+      const destinoOcupante = antes?.tipo === 'gancho' ? { ...antes } : AL_SIN_DOBLAR();
+      ocupante.ubicacion = normalizarUbicacion(s, destinoOcupante);
+      ocupante.archived_at = ocupante.archived_at || nowISO();
+    }
+  }
+  c.ubicacion = dest;
+  // archived_at deja de gobernar el estado —lo gobierna ubicacion— pero se
+  // mantiene fiel a lo que siempre significó: cuándo dejó de estar puesta.
+  c.archived_at = dest.tipo === 'puesta' ? null : (c.archived_at || nowISO());
+  if (opts.evento !== false) {
+    const eraPuesta = antes?.tipo === 'puesta';
+    const esPuesta = dest.tipo === 'puesta';
+    if (eraPuesta && !esPuesta) pushEvento(s, { tipo: 'camiseta_retirada', cam_id: c.id, nombre: c.nombre });
+    else if (!eraPuesta && esPuesta) pushEvento(s, { tipo: 'camiseta_recuperada', cam_id: c.id, nombre: c.nombre });
+    // Mover de un gancho a un cerro es acomodar el clóset, no cambiar de
+    // identidad. Eso no deja rastro en la historia.
+  }
+  return true;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 11);
@@ -205,13 +309,18 @@ const FORMAS = [
   { id: 'facil',      label: 'fácil',      hint: 'minutos, simple',     puntosBase: 1, glyph: '·' },
   { id: 'recurrente', label: 'recurrente', hint: 'hábito que vuelve',   puntosBase: 2, glyph: '⟳' },
 ];
+// Los colores son los que el codec ya le pinta a cada tono en la camiseta
+// (TONO_COLORS en src/codec/index.js). Una misión física es magenta acá y
+// magenta en la prenda: el app y la obra hablan el mismo idioma de color.
+// 'estratégica' no tiene color en el codec; toma el naranja de los motivos.
 const TONOS = [
-  { id: 'profunda',    label: 'profunda' },
-  { id: 'fisica',      label: 'física' },
-  { id: 'emocional',   label: 'emocional' },
-  { id: 'creativa',    label: 'creativa' },
-  { id: 'estrategica', label: 'estratégica' },
+  { id: 'profunda',    label: 'profunda',    color: '#8900FD' },
+  { id: 'fisica',      label: 'física',      color: '#DA1895' },
+  { id: 'emocional',   label: 'emocional',   color: '#0DEDF7' },
+  { id: 'creativa',    label: 'creativa',    color: '#F4FF01' },
+  { id: 'estrategica', label: 'estratégica', color: '#FF9E01' },
 ];
+const colorTono = (id) => TONOS.find(t => t.id === id)?.color || 'var(--ink-faint)';
 const SUGERENCIAS_EMOJI = ['🧭','⚓','🎭','🌱','🪶','🔥','🗺️','🦴','🪞','🎯','🪐','🪨','🌊','🏛️','📜','🜃'];
 
 // Catálogo curado por Dumpa. Estas son las camisetas pre-establecidas que un nuevo
@@ -425,12 +534,12 @@ export default function App() {
   }, [state]);
 
   const update = (mut) => setState(prev => { const n = structuredClone(prev); mut(n); return n; });
-  const pushEv = (s, ev) => { s.eventos.push({ id: uid(), ts: nowISO(), ...ev }); };
+  const pushEv = pushEvento;
   const pushMov = (s, mov) => { s.movimientos.push({ id: uid(), ts: nowISO(), ...mov }); };
 
   const addCamiseta = (data) => update(s => {
     const id = uid();
-    s.camisetas.push({ id, ...data, creador_id: s.user_id, origen: 'propia', origen_camiseta_id: null, precio: null, created_at: nowISO(), archived_at: null, misiones: [], milestones: [] });
+    s.camisetas.push({ id, ...data, creador_id: s.user_id, origen: 'propia', origen_camiseta_id: null, precio: null, created_at: nowISO(), archived_at: null, ubicacion: PUESTA(), misiones: [], milestones: [] });
     pushEv(s, { tipo: 'camiseta_creada', cam_id: id, nombre: data.nombre, emoji: data.emoji, esencia: data.esencia ?? '', arco: data.arco ?? null });
   });
   const recibirCamiseta = (molde) => {
@@ -455,6 +564,7 @@ export default function App() {
         precio: null,
         created_at: nowISO(),
         archived_at: null,
+        ubicacion: PUESTA(),
         misiones: (molde.misiones || []).map(m => ({
           id: uid(),
           nombre: m.nombre,
@@ -496,7 +606,7 @@ export default function App() {
         id: camId,
         nombre: cat.nombre, emoji: cat.emoji, esencia: cat.esencia, arco: cat.arco,
         creador_id: cat.creador_id, origen: 'comprada', origen_camiseta_id: cat.id, precio: cat.precio,
-        created_at: nowISO(), archived_at: null,
+        created_at: nowISO(), archived_at: null, ubicacion: PUESTA(),
         misiones: [], milestones: [],
       };
       cat.misiones.forEach(m => {
@@ -522,27 +632,63 @@ export default function App() {
     });
     return ok;
   };
-  const archiveCamiseta = (id) => update(s => {
-    const c = s.camisetas.find(c => c.id === id);
-    if (c) { c.archived_at = nowISO(); pushEv(s, { tipo: 'camiseta_retirada', cam_id: id, nombre: c.nombre }); }
+  // Guardar en el clóset = mandarla al cerro sin doblar. Ponérsela = sacarla.
+  // Las dos son la misma movida de siempre, con otro nombre.
+  const moverCamiseta = (id, destino) => update(s => { aplicarMovida(s, id, destino); });
+  const archiveCamiseta = (id) => update(s => { aplicarMovida(s, id, AL_SIN_DOBLAR()); });
+  const reviveCamiseta = (id) => update(s => { aplicarMovida(s, id, PUESTA()); });
+
+  // Lavar la ropa. Todas las puestas al cerro sin doblar, sin excepciones,
+  // sin confirmación y sin deshacer. Cada camiseta hace exactamente la misma
+  // transición que si la guardaras a mano —el mismo aplicarMovida—, pero la
+  // historia recibe un solo evento con los ids en vez de diecinueve.
+  const lavarLaRopa = () => update(s => {
+    const puestas = s.camisetas.filter(estaPuesta);
+    if (puestas.length === 0) return;
+    const ids = puestas.map(c => c.id);
+    const nombres = puestas.map(c => c.nombre);
+    ids.forEach(id => aplicarMovida(s, id, AL_SIN_DOBLAR(), { evento: false }));
+    // nombres junto a los ids por la misma razón que en v7: el id deja de
+    // resolver si la camiseta se dona después.
+    pushEv(s, { tipo: 'lavada', fecha: nowISO(), camisetas: ids, nombres });
   });
-  const reviveCamiseta = (id) => update(s => {
-    const c = s.camisetas.find(c => c.id === id);
-    if (c) { c.archived_at = null; pushEv(s, { tipo: 'camiseta_recuperada', cam_id: id, nombre: c.nombre }); }
+
+  const crearCerro = (nombre) => update(s => {
+    const n = (nombre || '').trim();
+    if (!n) return;
+    const orden = s.cerros.reduce((mx, c) => Math.max(mx, c.orden ?? 0), 0) + 1;
+    s.cerros.push({ id: uid(), nombre: n, orden, esDelSistema: false });
+  });
+  const renombrarCerro = (id, nombre) => update(s => {
+    const c = s.cerros.find(x => x.id === id);
+    const n = (nombre || '').trim();
+    if (!c || c.esDelSistema || !n) return;
+    c.nombre = n;
+  });
+  // Borrar un cerro devuelve sus camisetas al cerro sin doblar. No se pierde nada.
+  const borrarCerro = (id) => update(s => {
+    const c = s.cerros.find(x => x.id === id);
+    if (!c || c.esDelSistema) return;
+    s.camisetas.forEach(cam => { if (enCerro(cam, id)) aplicarMovida(s, cam.id, AL_SIN_DOBLAR(), { evento: false }); });
+    s.cerros = s.cerros.filter(x => x.id !== id);
   });
   // Donar: la camiseta sale de tu set de verdad (no al closet). Los movimientos
   // de puntos quedan intactos, así que conservas lo que ganaste, y el diario
   // guarda el registro. La copia limpia se comparte aparte, vía ShareSheet (molde).
-  const donarCamiseta = (id, dedicatoria) => update(s => {
-    const c = s.camisetas.find(c => c.id === id);
-    if (!c) return;
-    const ded = (dedicatoria || '').trim();
-    // v7: la camiseta sale del array — el snapshot conserva sus textos y estado.
-    pushEv(s, { tipo: 'camiseta_donada', cam_id: id, nombre: c.nombre, emoji: c.emoji, dedicatoria: ded || undefined,
-      snapshot: { esencia: c.esencia ?? '', arco: c.arco ?? null,
-        misiones: (c.misiones || []).map(m => ({ id: m.id, nombre: m.nombre, forma: m.forma, estado: m.estado, completions: [...(m.completions || [])] })),
-        milestones: (c.milestones || []).map(ms => ({ id: ms.id, nombre: ms.nombre, regalo: ms.regalo ?? '', estado: ms.estado })) } });
-    s.camisetas = s.camisetas.filter(x => x.id !== id);
+  const donarCamiseta = (id, dedicatoria) => update(s => { aplicarDonacion(s, id, dedicatoria); });
+
+  // Donar un cerro entero. El cerro ya es la selección, así que no hay
+  // selección múltiple que construir. Cada camiseta se va por el mismo
+  // camino que si la donaras sola —un solo camino, no dos—, sin dedicatoria
+  // y sin compartir: un cerro no se le manda a nadie, se suelta. El cerro
+  // vacío desaparece con él; el del sistema se queda, vacío.
+  const donarCerro = (cerroId) => update(s => {
+    const k = s.cerros.find(x => x.id === cerroId);
+    if (!k) return;
+    const ids = s.camisetas.filter(c => enCerro(c, cerroId)).map(c => c.id);
+    if (ids.length === 0) return;
+    ids.forEach(id => aplicarDonacion(s, id, ''));
+    if (!k.esDelSistema) s.cerros = s.cerros.filter(x => x.id !== cerroId);
   });
   const editCamiseta = (id, data) => update(s => {
     const c = s.camisetas.find(c => c.id === id);
@@ -732,7 +878,7 @@ export default function App() {
   };
 
   if (!state) return <Loading />;
-  const camsActivas = state.camisetas.filter(c => !c.archived_at);
+  const camsActivas = state.camisetas.filter(estaPuesta);
   const puntosUser = puntosTotales(state.movimientos);
 
   // Instructivo de instalación: lo primero que ve un usuario nuevo.
@@ -782,7 +928,7 @@ export default function App() {
     return <Frame><CatalogoPreview
       cat={cat}
       puntos={puntosUser}
-      yaTenida={state.camisetas.some(c => c.origen_camiseta_id === cat.id && !c.archived_at)}
+      yaTenida={state.camisetas.some(c => c.origen_camiseta_id === cat.id && estaPuesta(c))}
       onBack={() => setPreviewCat(null)}
       onComprar={() => {
         const newId = comprarCamiseta(cat.id);
@@ -828,7 +974,7 @@ export default function App() {
   return (<Frame><Header puntos={puntosUser} warn={state._saveError} />
     <main className="px-5 pb-32 pt-2 max-w-2xl mx-auto">
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
-      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onRevive={reviveCamiseta} />}
+      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion} />}
     </main>
     <QuickNoteButton onClick={() => setShowNota(true)} />
@@ -888,31 +1034,68 @@ function Frame({ children }) {
   return (
     <div className="min-h-screen w-full" style={{ background: 'var(--bg)', color: 'var(--ink)' }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..700&family=JetBrains+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
+        /* La paleta no se inventó aquí: son los colores que el codec ya usa
+           para dibujar las camisetas (src/codec/index.js). Los cuatro tonos,
+           los motivos, el trazo y el papel. El app es el negativo de la obra:
+           lo que allá es papel, acá es tinta. */
         :root {
-          --bg: #F2EBDD; --bg-card: #EBE2D0;
-          --ink: #1C1813; --ink-soft: #5C5147; --ink-faint: #8A7E70;
-          --line: #C9BCA6; --line-soft: #D9CFBC;
-          --accent: #8B2D1C; --accent-soft: #B5614E;
-          --ocean: #2D4A6B; --moss: #5C7048; --gold: #A07E2B; --warm: #C77A3A;
-          --grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.11, 0 0 0 0 0.09, 0 0 0 0 0.07, 0 0 0 0.08 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+          --void: #0a0a0a; --papel: #F0E5D0;
+          --magenta: #DA1895;   /* tono física   */
+          --cian:    #0DEDF7;   /* tono emocional */
+          --acido:   #F4FF01;   /* tono creativa  */
+          --violeta: #8900FD;   /* tono profunda  */
+          --lima:    #37FF14; --naranja: #FF9E01; --rojo: #F3144D;
+          --violeta-luz: #B571FF;   /* el violeta puro es muy oscuro sobre negro */
+
+          --bg: #0a0a0a; --bg-card: #15111F;
+          --ink: #F0E5D0; --ink-soft: #B9AE99; --ink-faint: #7B7490;
+          --line: #3B3350; --line-soft: #241E33;
+          --accent: #F3144D; --accent-soft: #DA1895;
+          --ocean: #0DEDF7; --moss: #37FF14; --gold: #F4FF01; --warm: #FF9E01;
         }
-        body { font-family: 'Fraunces', Georgia, serif; }
-        .ff-serif { font-family: 'Fraunces', Georgia, serif; }
-        .ff-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-        .grain::before { content: ''; position: fixed; inset: 0; pointer-events: none; background-image: var(--grain); opacity: 0.5; mix-blend-mode: multiply; z-index: 100; }
-        .display { font-variation-settings: 'opsz' 144, 'SOFT' 50; font-weight: 350; letter-spacing: -0.02em; }
-        .smallcaps { text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.7rem; font-weight: 500; }
+        body { font-family: 'Chakra Petch', system-ui, sans-serif; }
+        .ff-serif { font-family: 'Chakra Petch', system-ui, sans-serif; }
+        .ff-mono { font-family: 'Space Mono', ui-monospace, monospace; }
+        /* La firma: aberración cromática. Es literalmente el mismo gesto que
+           el codec le hace a la silueta de la camiseta —una copia cian
+           desplazada y una magenta al otro lado— aplicado a los titulares. */
+        .display {
+          font-family: 'Chakra Petch', system-ui, sans-serif;
+          font-weight: 700; letter-spacing: -0.01em; line-height: 1.05;
+          text-shadow: 1.5px 0 rgba(13,237,247,0.85), -1.5px 1px rgba(218,24,149,0.85);
+        }
+        .smallcaps { font-family: 'Space Mono', ui-monospace, monospace;
+          text-transform: uppercase; letter-spacing: 0.22em; font-size: 0.68rem; font-weight: 700; }
+        /* Trama de tubo: líneas de barrido y un halo violeta arriba. Sustituye
+           al grano de papel, que era de la otra vida del app. */
+        .grain::before {
+          content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 100;
+          background:
+            repeating-linear-gradient(to bottom, rgba(240,229,208,0.035) 0 1px, transparent 1px 3px),
+            radial-gradient(120% 70% at 50% -10%, rgba(137,0,253,0.20), transparent 62%),
+            radial-gradient(100% 60% at 50% 110%, rgba(13,237,247,0.07), transparent 60%);
+        }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
         .fade-up { animation: fadeUp 0.4s ease both; }
         .fade-up-d1 { animation: fadeUp 0.4s ease both 0.08s; opacity: 0; }
         .fade-up-d2 { animation: fadeUp 0.4s ease both 0.16s; opacity: 0; }
         .fade-up-d3 { animation: fadeUp 0.4s ease both 0.24s; opacity: 0; }
-        .ring-ink:focus { outline: 2px solid var(--ink); outline-offset: 2px; }
+        .ring-ink:focus-visible { outline: 2px solid var(--cian); outline-offset: 2px; }
         .check-ani { transition: all 0.25s cubic-bezier(.34,1.6,.6,1); }
         .hr-deco { background-image: radial-gradient(circle, var(--line) 1px, transparent 1.5px); background-size: 8px 8px; background-repeat: repeat-x; background-position: center; height: 8px; }
-        textarea, input { background: transparent; }
+        .boton-neon { color: var(--cian); border: 1px solid var(--cian); background: transparent;
+          transition: background 0.18s ease, box-shadow 0.18s ease; }
+        .boton-neon:active { background: rgba(13,237,247,0.12); box-shadow: 0 0 26px -6px var(--cian); }
+        .aberracion-caja { box-shadow: 3px 0 0 -1px var(--magenta), -3px 0 0 -1px var(--cian), 0 10px 30px rgba(0,0,0,0.75); }
+        textarea, input, select { background: transparent; color: var(--ink); caret-color: var(--cian); }
+        input::placeholder, textarea::placeholder { color: var(--ink-faint); opacity: 1; }
+        ::selection { background: var(--magenta); color: var(--void); }
         details summary::-webkit-details-marker { display: none; }
+        @media (prefers-reduced-motion: reduce) {
+          .fade-up, .fade-up-d1, .fade-up-d2, .fade-up-d3 { animation: none; opacity: 1; }
+          .check-ani { transition: none; }
+        }
       `}</style>
       <div className="grain" />
       {children}
@@ -920,7 +1103,7 @@ function Frame({ children }) {
   );
 }
 
-function Loading() { return <div className="min-h-screen flex items-center justify-center" style={{ background: '#F2EBDD' }}><span className="ff-mono text-sm" style={{ color: '#8A7E70' }}>cargando…</span></div>; }
+function Loading() { return <div className="min-h-screen flex items-center justify-center" style={{ background: '#0a0a0a' }}><span className="ff-mono text-sm" style={{ color: '#7B7490', letterSpacing: '0.2em' }}>cargando…</span></div>; }
 
 function Header({ puntos, warn }) {
   return (<header className="px-5 pt-6 pb-3 max-w-2xl mx-auto">
@@ -1066,7 +1249,7 @@ function Catalogo({ catalogo, camisetas, puntos, onPreview, onClose, onCrearProp
     </p>
     <div className="space-y-3 mb-10">
       {catalogo.map(cat => {
-        const ya = camisetas.some(c => c.origen_camiseta_id === cat.id && !c.archived_at);
+        const ya = camisetas.some(c => c.origen_camiseta_id === cat.id && estaPuesta(c));
         const puedePagar = puntos >= cat.precio;
         return (<button key={cat.id} onClick={() => onPreview(cat.id)}
           className="block w-full text-left p-5 ring-ink"
@@ -1116,7 +1299,9 @@ function CatalogoPreview({ cat, puntos, yaTenida, onBack, onComprar }) {
           <span className="ff-mono text-xs mt-1" style={{ color: 'var(--ink-faint)' }}>{FORMAS.find(f => f.id === m.forma)?.glyph}</span>
           <span className="flex-1 ff-serif text-base">{m.nombre}
             <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>
-              {m.forma}{m.tonos?.length ? ' · ' + m.tonos.map(t => TONOS.find(x => x.id === t)?.label).join(' · ') : ''}
+              {m.forma}{m.tonos?.map(t => (
+                <span key={t}> · <span style={{ color: colorTono(t) }}>{TONOS.find(x => x.id === t)?.label}</span></span>
+              ))}
             </span>
           </span>
           <span className="ff-mono text-xs mt-1" style={{ color: 'var(--gold)' }}>+{m.puntos_base}</span>
@@ -1403,42 +1588,276 @@ function MisionRow({ m, onToggle, onUndo }) {
   </div>);
 }
 
-function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, onImport, onReorder, onRevive }) {
-  const activas = cams.filter(c => !c.archived_at);
-  const archivadas = cams.filter(c => c.archived_at);
+// Donar es una sola cosa, pase por donde pase: la camiseta sale del array y
+// el evento conserva sus textos. Lo usan el ritual de una y el de un cerro.
+function aplicarDonacion(s, camId, dedicatoria) {
+  const c = s.camisetas.find(x => x.id === camId);
+  if (!c) return false;
+  const ded = (dedicatoria || '').trim();
+  pushEvento(s, { tipo: 'camiseta_donada', cam_id: camId, nombre: c.nombre, emoji: c.emoji,
+    dedicatoria: ded || undefined,
+    snapshot: { esencia: c.esencia ?? '', arco: c.arco ?? null,
+      misiones: (c.misiones || []).map(m => ({ id: m.id, nombre: m.nombre, forma: m.forma, estado: m.estado, completions: [...(m.completions || [])] })),
+      milestones: (c.milestones || []).map(ms => ({ id: ms.id, nombre: ms.nombre, regalo: ms.regalo ?? '', estado: ms.estado })) } });
+  s.camisetas = s.camisetas.filter(x => x.id !== camId);
+  return true;
+}
+
+// Despedirse de un cerro entero. Mismo peso que despedirse de una: un último
+// vistazo a lo que hay dentro y un gesto sostenido. Lo que no lleva es la
+// opción de mandárselo a alguien —un cerro no se le manda a nadie, se suelta.
+function DespedidaCerro({ cerro, dentro, onDonar, onCancel }) {
+  return (<div className="fade-up" style={{ border: '1px solid var(--accent)', borderRadius: 2, padding: 16 }}>
+    <div className="flex items-baseline justify-between mb-3">
+      <span className="smallcaps" style={{ color: 'var(--accent)' }}>Soltar el cerro</span>
+      <button onClick={onCancel} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Cancelar"><X size={16} /></button>
+    </div>
+    <p className="ff-serif italic mb-4" style={{ color: 'var(--ink-soft)' }}>
+      Un último vistazo a «{cerro.nombre}». Estas {dentro.length === 1 ? 'es la camiseta' : `son las ${dentro.length} camisetas`} que estás soltando:
+    </p>
+    <div className="grid gap-1 mb-5" style={{ maxHeight: '40vh', overflowY: 'auto' }}>
+      {dentro.map(c => (
+        <div key={c.id} className="flex items-baseline gap-2 ff-serif">
+          <span>{c.emoji}</span><span className="flex-1">{c.nombre}</span>
+          {c.esencia && <span className="ff-mono text-xs truncate" style={{ color: 'var(--ink-faint)', maxWidth: '45%' }}>{c.esencia}</span>}
+        </div>
+      ))}
+    </div>
+    <p className="ff-serif text-sm mb-4" style={{ color: 'var(--ink-soft)' }}>
+      Salen de tu clóset y no vuelven. Conservas los puntos que ganaste con ellas y la historia guarda por dónde pasaron.
+    </p>
+    <HoldToRelease label={`soltar ${dentro.length === 1 ? 'la camiseta' : 'las ' + dentro.length}`} onComplete={onDonar} duration={2000} />
+  </div>);
+}
+
+// ── El mueble ────────────────────────────────────────────────────────────
+// El clóset dejó de ser una lista. Tres superficies: lo que llevas puesto,
+// cinco ganchos y los cerros. No son tres formas de ordenar: son tres formas
+// de decir cuánto te importa una camiseta ahora mismo.
+
+// Arrastrar con el dedo. El drag-and-drop nativo de HTML no existe en iOS y
+// este clóset vive en un iPhone, así que va con pointer events desde un
+// agarradero propio (touch-action: none) para no pelear con el scroll. Las
+// zonas donde se puede soltar se marcan con data-drop.
+function useArrastre(onSoltar, onTap) {
+  const [drag, setDrag] = useState(null);     // { cam, x, y, movido }
+  const [zona, setZona] = useState(null);
+  const st = useRef({});
+
+  // Autoscroll: el mueble no cabe en una pantalla. Sin esto no hay forma de
+  // llevar la camiseta 19 hasta un gancho. Va por intervalo y no por evento
+  // porque el dedo puede quedarse quieto en el borde.
+  useEffect(() => {
+    if (!drag) return;
+    const id = setInterval(() => { if (st.current.dir) window.scrollBy(0, st.current.dir * 12); }, 16);
+    return () => clearInterval(id);
+  }, [!!drag]);
+
+  useEffect(() => {
+    if (!drag) return;
+    const mover = (e) => {
+      const x = e.clientX, y = e.clientY;
+      const movido = Math.hypot(x - st.current.x0, y - st.current.y0) > 6;
+      const el = document.elementFromPoint(x, y)?.closest?.('[data-drop]');
+      st.current.zona = movido ? (el?.dataset?.drop ?? null) : null;
+      st.current.movido = movido;
+      st.current.dir = !movido ? 0 : y < 100 ? -1 : y > window.innerHeight - 100 ? 1 : 0;
+      setZona(st.current.zona);
+      setDrag(d => d && { ...d, x, y, movido });
+    };
+    const soltar = () => {
+      const { movido, zona: z, cam } = st.current;
+      st.current.dir = 0;
+      setDrag(null); setZona(null);
+      // Soltar sin haber movido el dedo es un toque en el agarradero: en vez
+      // de arrastrar, se abre la lista de sitios. Misma intención, otra mano.
+      if (!movido) { onTap?.(cam); return; }
+      if (z) onSoltar(cam, z);
+    };
+    window.addEventListener('pointermove', mover);
+    window.addEventListener('pointerup', soltar);
+    window.addEventListener('pointercancel', soltar);
+    return () => {
+      window.removeEventListener('pointermove', mover);
+      window.removeEventListener('pointerup', soltar);
+      window.removeEventListener('pointercancel', soltar);
+    };
+  }, [drag?.cam?.id]);
+
+  const agarrar = (e, cam) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    st.current = { x0: e.clientX, y0: e.clientY, cam, zona: null, movido: false, dir: 0 };
+    setDrag({ cam, x: e.clientX, y: e.clientY, movido: false });
+  };
+
+  const fantasma = drag && drag.movido ? (
+    <div className="fixed pointer-events-none ff-serif flex items-center gap-2 px-3 py-2 aberracion-caja"
+      style={{
+        left: drag.x, top: drag.y, transform: 'translate(-50%, -50%) rotate(-2deg)',
+        zIndex: 200, background: 'var(--bg-card)', border: '1px solid var(--cian)', borderRadius: 2,
+      }}>
+      <span className="text-xl">{drag.cam.emoji}</span>
+      <span className="text-base">{drag.cam.nombre}</span>
+    </div>
+  ) : null;
+
+  return { agarrar, fantasma, zona, arrastrando: drag?.movido ? drag.cam.id : null };
+}
+
+function Agarradero({ onPointerDown, label }) {
+  return (
+    <button onPointerDown={onPointerDown}
+      className="ring-ink px-2 flex items-center justify-center"
+      style={{ touchAction: 'none', color: 'var(--ink-faint)', cursor: 'grab' }}
+      aria-label={label}>
+      <GripVertical size={16} strokeWidth={1.5} />
+    </button>
+  );
+}
+
+// La lista de sitios, para cuando arrastrar no es cómodo o no es posible.
+function MoverSheet({ cam, cerros, cams, onMover, onClose }) {
+  const ocupante = (i) => cams.find(c => c.id !== cam.id && enGancho(c, i));
+  const ir = (u) => { onMover(cam.id, u); onClose(); };
+  return (<div className="fixed inset-0 flex items-end justify-center" style={{ zIndex: 150, background: 'rgba(4,2,10,0.72)' }} onClick={onClose}>
+    <div className="w-full max-w-xl p-5 fade-up" style={{ background: 'var(--bg)', borderTop: '1px solid var(--cian)', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+      <div className="flex items-baseline justify-between mb-4">
+        <span className="ff-serif text-lg">{cam.emoji} {cam.nombre}</span>
+        <button onClick={onClose} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Cerrar"><X size={16} /></button>
+      </div>
+      <div className="grid gap-1">
+        {!estaPuesta(cam) && (
+          <button onClick={() => ir(PUESTA())} className="text-left ring-ink py-2 px-3 ff-serif"
+            style={{ border: '1px solid var(--line-soft)' }}>ponérmela</button>
+        )}
+        {Array.from({ length: GANCHOS }, (_, i) => {
+          const oc = ocupante(i);
+          if (enGancho(cam, i)) return null;
+          return (<button key={i} onClick={() => ir({ tipo: 'gancho', posicion: i })}
+            className="text-left ring-ink py-2 px-3 ff-serif flex items-baseline gap-2"
+            style={{ border: '1px solid var(--line-soft)' }}>
+            <span>gancho {i + 1}</span>
+            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>
+              {oc ? `· ocupado por ${oc.nombre}` : '· libre'}
+            </span>
+          </button>);
+        })}
+        {cerros.map(k => enCerro(cam, k.id) ? null : (
+          <button key={k.id} onClick={() => ir({ tipo: 'cerro', cerroId: k.id })}
+            className="text-left ring-ink py-2 px-3 ff-serif flex items-baseline gap-2"
+            style={{ border: '1px solid var(--line-soft)' }}>
+            <span>{k.nombre}</span>
+            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>
+              · {cams.filter(c => enCerro(c, k.id)).length}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  </div>);
+}
+
+function FilaCamiseta({ cam, agarrar, onOpen, atenuada }) {
+  return (<div className="flex items-stretch" style={{
+    background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2,
+    opacity: atenuada ? 0.35 : 1,
+  }}>
+    <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
+    <button onClick={() => onOpen(cam.id)} className="text-left ring-ink flex-1 py-2 pr-3">
+      <div className="flex items-center gap-3">
+        <span className="text-xl">{cam.emoji}</span>
+        <span className="ff-serif text-base flex-1">{cam.nombre}</span>
+        <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
+      </div>
+    </button>
+  </div>);
+}
+
+function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCatalogo, onImport,
+                        onReorder, onMover, onLavar, onCrearCerro, onRenombrarCerro, onBorrarCerro, onDonarCerro }) {
+  // Los cerros arrancan abiertos: un cerro sirve para saber qué hay dentro.
+  // Se cierran cuando estorban, no al revés.
+  const [cerrados, setCerrados] = useState(() => new Set());
+  const [creandoCerro, setCreandoCerro] = useState(false);
+  const [nombreCerro, setNombreCerro] = useState('');
+  const [renombrando, setRenombrando] = useState(null);
+  const [borrando, setBorrando] = useState(null);
+  const [donando, setDonando] = useState(null);
+  const [moviendo, setMoviendo] = useState(null);
+
+  const { agarrar, fantasma, zona, arrastrando } = useArrastre(
+    (cam, destino) => {
+      const [tipo, arg] = destino.split(':');
+      if (tipo === 'puesta') onMover(cam.id, PUESTA());
+      else if (tipo === 'gancho') onMover(cam.id, { tipo: 'gancho', posicion: Number(arg) });
+      else if (tipo === 'cerro') onMover(cam.id, { tipo: 'cerro', cerroId: arg });
+    },
+    (cam) => setMoviendo(cam.id),
+  );
+
+  const puestas = cams.filter(estaPuesta);
+  const ordenados = [...cerros].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+  const toggleCerro = (id) => setCerrados(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+  const marco = (clave) => zona === clave
+    ? { borderColor: 'var(--cian)', boxShadow: '0 0 0 1px var(--magenta), 0 0 18px -4px var(--cian)' }
+    : { borderColor: 'var(--line-soft)' };
+
+  const camMoviendo = moviendo ? cams.find(c => c.id === moviendo) : null;
+
   return (<div className="fade-up">
+    {fantasma}
+    {camMoviendo && <MoverSheet cam={camMoviendo} cerros={ordenados} cams={cams}
+      onMover={onMover} onClose={() => setMoviendo(null)} />}
+
     <div className="flex items-baseline justify-between mb-6">
-      <p className="ff-serif italic text-lg" style={{ color: 'var(--ink-soft)' }}>
-        Tu mazo. {activas.length} {activas.length === 1 ? 'camiseta' : 'camisetas'} en juego.
-      </p>
+      <p className="ff-serif italic text-lg" style={{ color: 'var(--ink-soft)' }}>Tu clóset.</p>
       <div className="flex gap-1">
         <button onClick={onOpenCatalogo} className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>catálogo</button>
         <button onClick={onImport} className="ring-ink p-2" style={{ color: 'var(--ink-soft)' }} aria-label="Recibir camiseta"><Inbox size={20} strokeWidth={1.5} /></button>
         <button onClick={onCreate} className="ring-ink p-2" style={{ color: 'var(--ink-soft)' }} aria-label="Crear camiseta"><Plus size={20} strokeWidth={1.5} /></button>
       </div>
     </div>
-    <div className="grid gap-3">
-      {activas.map((cam, i) => {
+
+    {/* ── Puestas ── van arriba: son las importantes. Sin límite, a propósito;
+        la salida no es un tope, es lavar la ropa. */}
+    <div className="flex items-baseline justify-between mb-3">
+      <span className="smallcaps" style={{ color: 'var(--magenta)' }}>Puestas</span>
+      <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{puestas.length}</span>
+    </div>
+    <div data-drop="puesta" className="grid gap-3"
+      style={{ border: '1px solid', borderRadius: 2, padding: puestas.length ? 0 : 16,
+               ...(zona === 'puesta' ? { borderColor: 'var(--cian)', boxShadow: '0 0 18px -4px var(--cian)' } : { borderColor: 'transparent' }) }}>
+      {puestas.length === 0 && (
+        <p className="ff-serif italic" style={{ color: 'var(--ink-faint)' }}>
+          No llevas nada puesto. Baja algo de un gancho o de un cerro.
+        </p>
+      )}
+      {puestas.map((cam, i) => {
         const act = cam.misiones.filter(m => enJuego(m)).length;
         const hechasTot = cam.misiones.reduce((acc, m) => acc + (m.completed_at ? 1 : 0) + (m.completions?.length || 0), 0);
         const puntosTot = puntosCamiseta(movimientos, cam.id);
-        const canUp = i > 0;
-        const canDown = i < activas.length - 1;
-        return (<div key={cam.id} className="flex" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2 }}>
-          {activas.length > 1 && (
-            <div className="flex flex-col border-r" style={{ borderColor: 'var(--line-soft)' }}>
-              <button onClick={() => onReorder(cam.id, -1)} disabled={!canUp}
-                className="ring-ink p-1.5 disabled:opacity-20"
-                style={{ color: 'var(--ink-faint)' }} aria-label="Subir camiseta">
+        return (<div key={cam.id} className="flex" style={{
+          background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2,
+          opacity: arrastrando === cam.id ? 0.35 : 1,
+        }}>
+          <div className="flex flex-col items-center justify-center border-r" style={{ borderColor: 'var(--line-soft)' }}>
+            {puestas.length > 1 && (
+              <button onClick={() => onReorder(cam.id, -1)} disabled={i === 0}
+                className="ring-ink p-1.5 disabled:opacity-20" style={{ color: 'var(--ink-faint)' }} aria-label="Subir camiseta">
                 <ChevronUp size={16} strokeWidth={1.5} />
               </button>
-              <button onClick={() => onReorder(cam.id, +1)} disabled={!canDown}
-                className="ring-ink p-1.5 disabled:opacity-20"
-                style={{ color: 'var(--ink-faint)' }} aria-label="Bajar camiseta">
+            )}
+            <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
+            {puestas.length > 1 && (
+              <button onClick={() => onReorder(cam.id, +1)} disabled={i === puestas.length - 1}
+                className="ring-ink p-1.5 disabled:opacity-20" style={{ color: 'var(--ink-faint)' }} aria-label="Bajar camiseta">
                 <ChevronDown size={16} strokeWidth={1.5} />
               </button>
-            </div>
-          )}
+            )}
+          </div>
           <button onClick={() => onOpen(cam.id)} className="text-left p-5 ring-ink flex-1">
             <div className="flex items-start gap-4">
               <span className="text-3xl">{cam.emoji}</span>
@@ -1457,32 +1876,134 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
         </div>);
       })}
     </div>
-    {archivadas.length > 0 && (<>
-      <div className="mt-12 mb-2 flex items-baseline justify-between">
-        <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Closet</span>
-        <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{archivadas.length} {archivadas.length === 1 ? 'camiseta' : 'camisetas'}</span>
+
+    {/* Lavar la ropa. Al final de la lista, que es donde llega el agobio.
+        Sin confirmación y sin deshacer: no destruye nada, y preguntarle
+        "¿estás seguro?" a alguien agobiado es insufrible. */}
+    {puestas.length > 0 && (
+      <button onClick={onLavar} className="w-full ring-ink ff-mono text-sm py-4 mt-4 mb-12 boton-neon"
+        style={{ letterSpacing: '0.18em' }}>
+        LAVAR LA ROPA
+      </button>
+    )}
+
+    {/* ── Ganchos ── cinco, fijos. Un gancho libre es información, así que
+        se dibuja vacío en vez de desaparecer. */}
+    <div className="smallcaps mb-3" style={{ color: 'var(--cian)' }}>Ganchos</div>
+    <div className="grid gap-2 mb-12">
+      {Array.from({ length: GANCHOS }, (_, i) => {
+        const cam = cams.find(c => enGancho(c, i));
+        return (<div key={i} data-drop={`gancho:${i}`}
+          style={{ border: cam ? '1px solid' : '1px dashed', borderRadius: 2,
+                   background: cam ? 'var(--bg-card)' : 'transparent', ...marco(`gancho:${i}`) }}>
+          {cam ? (
+            <div className="flex items-stretch" style={{ opacity: arrastrando === cam.id ? 0.35 : 1 }}>
+              <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
+              <button onClick={() => onOpen(cam.id)} className="text-left ring-ink flex-1 py-3 pr-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{cam.emoji}</span>
+                  <span className="ff-serif text-lg flex-1">{cam.nombre}</span>
+                  <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
+                </div>
+              </button>
+            </div>
+          ) : (
+            <div className="py-4 px-4 ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>gancho libre</div>
+          )}
+        </div>);
+      })}
+    </div>
+
+    {/* ── Cerros ── montones con nombre. Por dentro no se ordenan. */}
+    <div className="flex items-baseline justify-between mb-3">
+      <span className="smallcaps" style={{ color: 'var(--violeta-luz)' }}>Cerros</span>
+      {!creandoCerro && (
+        <button onClick={() => { setCreandoCerro(true); setNombreCerro(''); }}
+          className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>
+          nuevo cerro
+        </button>
+      )}
+    </div>
+    {creandoCerro && (
+      <div className="flex gap-2 mb-3 fade-up">
+        <input value={nombreCerro} onChange={e => setNombreCerro(e.target.value)} autoFocus
+          placeholder="nombre del cerro"
+          onKeyDown={e => { if (e.key === 'Enter' && nombreCerro.trim()) { onCrearCerro(nombreCerro); setCreandoCerro(false); } if (e.key === 'Escape') setCreandoCerro(false); }}
+          className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+        <button onClick={() => { if (nombreCerro.trim()) onCrearCerro(nombreCerro); setCreandoCerro(false); }}
+          className="ring-ink ff-mono text-xs px-3" style={{ border: '1px solid var(--cian)', color: 'var(--cian)' }}>crear</button>
+        <button onClick={() => setCreandoCerro(false)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={16} /></button>
       </div>
-      <p className="ff-serif italic text-sm mb-4" style={{ color: 'var(--ink-faint)' }}>Visibles, fuera del juego. Las puedes volver al mazo cuando quieras.</p>
-      <div className="grid gap-3">
-        {archivadas.map(cam => (
-          <div key={cam.id} className="flex" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2, opacity: 0.7 }}>
-            <button onClick={() => onRevive(cam.id)}
-              className="ring-ink px-3 flex items-center justify-center border-r"
-              style={{ borderColor: 'var(--line-soft)', color: 'var(--moss)' }}
-              aria-label="Devolver al mazo">
-              <RotateCcw size={16} strokeWidth={1.5} />
-            </button>
-            <button onClick={() => onOpen(cam.id)} className="text-left p-4 ring-ink flex-1">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{cam.emoji}</span>
-                <span className="ff-serif text-lg flex-1">{cam.nombre}</span>
-                <ChevronRight size={18} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
-              </div>
-            </button>
-          </div>
-        ))}
-      </div>
-    </>)}
+    )}
+    <div className="grid gap-2 pb-8">
+      {ordenados.map(k => {
+        const dentro = cams.filter(c => enCerro(c, k.id));
+        const abierto = !cerrados.has(k.id);
+        return (<div key={k.id} data-drop={`cerro:${k.id}`}
+          style={{ border: '1px solid', borderRadius: 2, background: 'var(--bg-card)', ...marco(`cerro:${k.id}`) }}>
+          {renombrando === k.id ? (
+            <div className="flex gap-2 p-3">
+              <input defaultValue={k.nombre} autoFocus
+                onKeyDown={e => { if (e.key === 'Enter') { onRenombrarCerro(k.id, e.target.value); setRenombrando(null); } if (e.key === 'Escape') setRenombrando(null); }}
+                onBlur={e => { onRenombrarCerro(k.id, e.target.value); setRenombrando(null); }}
+                className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+            </div>
+          ) : (
+            <div className="flex items-center">
+              <button onClick={() => toggleCerro(k.id)} className="text-left ring-ink flex-1 py-3 px-4">
+                <div className="flex items-baseline gap-2">
+                  <span className="ff-serif text-lg">{k.nombre}</span>
+                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{dentro.length}</span>
+                  {/* Cerrado, la tira de emojis dice qué hay sin abrirlo. */}
+                  {!abierto && <span className="flex-1 truncate text-sm">{dentro.map(c => c.emoji).join(' ')}</span>}
+                  {abierto ? <ChevronUp size={16} strokeWidth={1.4} className="ml-auto" style={{ color: 'var(--ink-faint)' }} />
+                           : <ChevronDown size={16} strokeWidth={1.4} className="ml-auto" style={{ color: 'var(--ink-faint)' }} />}
+                </div>
+              </button>
+              {!k.esDelSistema && (borrando === k.id ? (
+                <div className="flex items-center gap-2 pr-3 fade-up">
+                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>¿borrar?</span>
+                  <button onClick={() => { onBorrarCerro(k.id); setBorrando(null); }} className="ring-ink ff-mono text-xs px-2 py-0.5" style={{ color: 'var(--accent)', border: '1px solid var(--accent)' }}>sí</button>
+                  <button onClick={() => setBorrando(null)} className="ring-ink ff-mono text-xs px-2 py-0.5" style={{ color: 'var(--ink-faint)' }}>no</button>
+                </div>
+              ) : (
+                <div className="flex items-center pr-2">
+                  <button onClick={() => setRenombrando(k.id)} className="ring-ink p-2" style={{ color: 'var(--ink-faint)' }} aria-label={`Renombrar ${k.nombre}`}><Edit2 size={14} strokeWidth={1.5} /></button>
+                  <button onClick={() => setBorrando(k.id)} className="ring-ink p-2" style={{ color: 'var(--ink-faint)' }} aria-label={`Borrar ${k.nombre}`}><Trash2 size={14} strokeWidth={1.5} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          {abierto && (
+            <div className="px-3 pb-3">
+              {dentro.length === 0
+                ? <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Vacío.</p>
+                : (<>
+                    <div className="grid gap-1">
+                      {dentro.map(cam => <FilaCamiseta key={cam.id} cam={cam} agarrar={agarrar}
+                        onOpen={onOpen} atenuada={arrastrando === cam.id} />)}
+                    </div>
+                    {/* Donar el cerro entero. El cerro ya es la selección: no
+                        hace falta escoger camiseta por camiseta. */}
+                    {donando === k.id ? (
+                      <div className="mt-3">
+                        <DespedidaCerro cerro={k} dentro={dentro}
+                          onDonar={() => { onDonarCerro(k.id); setDonando(null); }}
+                          onCancel={() => setDonando(null)} />
+                      </div>
+                    ) : (
+                      <button onClick={() => setDonando(k.id)}
+                        className="ring-ink ff-mono text-xs mt-3 py-1 px-2"
+                        style={{ color: 'var(--ink-faint)', border: '1px solid var(--line-soft)' }}>
+                        donar el cerro
+                      </button>
+                    )}
+                  </>)}
+            </div>
+          )}
+        </div>);
+      })}
+    </div>
   </div>);
 }
 
@@ -1679,7 +2200,7 @@ function CamisetaDetail({ cam, movimientos, onBack, onAddMision, onEditMision, o
     </div>
     <h1 className="display text-4xl md:text-5xl mb-2">
       {cam.nombre}
-      {cam.archived_at && <span className="ff-mono text-xs ml-3 align-middle" style={{ color: 'var(--ink-faint)' }}>en closet</span>}
+      {!estaPuesta(cam) && <span className="ff-mono text-xs ml-3 align-middle" style={{ color: 'var(--ink-faint)' }}>en el clóset</span>}
     </h1>
     {cam.arco && (<div className="ff-mono text-xs mb-3" style={{ color: 'var(--ink-soft)' }}>
       {cam.arco.de} <span style={{ color: 'var(--ink-faint)' }}>→</span> {cam.arco.a}
@@ -1785,7 +2306,7 @@ function CamisetaDetail({ cam, movimientos, onBack, onAddMision, onEditMision, o
           onShare={() => setSharing(true)}
           onDonate={(ded) => onDonateCam(ded)}
           onCancel={() => setConfirmDonar(false)} />
-      ) : !cam.archived_at ? (
+      ) : estaPuesta(cam) ? (
         confirmRetiro ? (
           <div className="flex items-center gap-3 fade-up">
             <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-soft)' }}>¿«{cam.nombre}» al closet?</span>
@@ -2360,9 +2881,9 @@ function MisionForm({ initial, onSave, onCancel }) {
     <div className="flex flex-wrap gap-1 mb-3">
       {TONOS.map(t => (
         <button key={t.id} onClick={() => toggleTono(t.id)} className="ff-mono text-xs px-2 py-1 ring-ink" style={{
-          background: tonos.includes(t.id) ? 'var(--accent)' : 'transparent',
-          color: tonos.includes(t.id) ? 'var(--bg)' : 'var(--ink-soft)',
-          border: '1px solid ' + (tonos.includes(t.id) ? 'var(--accent)' : 'var(--line)'),
+          background: tonos.includes(t.id) ? t.color : 'transparent',
+          color: tonos.includes(t.id) ? 'var(--void)' : 'var(--ink-soft)',
+          border: '1px solid ' + (tonos.includes(t.id) ? t.color : 'var(--line)'),
         }}>{t.label}</button>
       ))}
     </div>
@@ -2496,7 +3017,7 @@ function BackupTools({ state }) {
 
 function Heatmap({ state }) {
   const [rango, setRango] = useState(7);
-  const cams = state.camisetas.filter(c => !c.archived_at);
+  const cams = state.camisetas.filter(estaPuesta);
   if (cams.length === 0) return null;
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -2565,11 +3086,11 @@ function Heatmap({ state }) {
           const esTibia = d.diasDesde !== null && d.diasDesde >= 7 && d.diasDesde < 14;
           const esFria = d.diasDesde !== null && d.diasDesde >= 14;
           const nunca = d.diasDesde === null;
-          const nombreColor = (esFria || nunca) ? '#8A7E70' : '#5C5147';
+          const nombreColor = (esFria || nunca) ? '#7B7490' : '#B9AE99';
           const dotColor = esFria || nunca ? '#8B2D1C' : esTibia ? '#C77A3A' : null;
           return (<g key={d.cam.id}>
-            <text x="0" y={y + rowHeight * 0.7} fontSize="13" fontFamily="Fraunces, Georgia, serif">
-              <tspan fill="#1C1813">{d.cam.emoji}</tspan>
+            <text x="0" y={y + rowHeight * 0.7} fontSize="13" fontFamily="Chakra Petch, system-ui, sans-serif">
+              <tspan fill="#F0E5D0">{d.cam.emoji}</tspan>
               <tspan dx="6" fill={nombreColor}>{d.cam.nombre}</tspan>
             </text>
             {dotColor && <circle cx={labelWidth - 8} cy={y + rowHeight * 0.5} r="2.5" fill={dotColor} />}
@@ -2580,7 +3101,7 @@ function Heatmap({ state }) {
                 fill={cellColor(p)} rx="1" />
             ))}
             {d.totalPeriodo > 0 && (
-              <text x={totalColX} y={y + rowHeight * 0.7} fontSize="10" fill="#8A7E70" fontFamily="JetBrains Mono, monospace">
+              <text x={totalColX} y={y + rowHeight * 0.7} fontSize="10" fill="#7B7490" fontFamily="Space Mono, monospace">
                 {round1(d.totalPeriodo)}
               </text>
             )}
@@ -2593,8 +3114,8 @@ function Heatmap({ state }) {
             x={labelWidth + i * (cellWidth + cellGap) + cellWidth / 2}
             y={data.length * (rowHeight + 4) + 12}
             fontSize="10" textAnchor="middle"
-            fill={isToday ? '#1C1813' : '#8A7E70'}
-            fontFamily="JetBrains Mono, monospace"
+            fill={isToday ? '#F0E5D0' : '#7B7490'}
+            fontFamily="Space Mono, monospace"
             fontWeight={isToday ? '500' : '400'}>{dowChars[d.getDay()]}</text>);
         })}
         {rango === 30 && dias.map((d, i) => {
@@ -2602,8 +3123,8 @@ function Heatmap({ state }) {
           return (<text key={i}
             x={labelWidth + i * (cellWidth + cellGap) + cellWidth / 2}
             y={data.length * (rowHeight + 4) + 12}
-            fontSize="9" textAnchor="middle" fill="#8A7E70"
-            fontFamily="JetBrains Mono, monospace">{d.getDate()}</text>);
+            fontSize="9" textAnchor="middle" fill="#7B7490"
+            fontFamily="Space Mono, monospace">{d.getDate()}</text>);
         })}
       </svg>
     </div>
@@ -2767,6 +3288,12 @@ function EventoItem({ e, cam, lookupCam }) {
     case 'sesion_mensual':
       glyph = '☾'; color = 'var(--accent)';
       text = <strong>observador del observador</strong>; break;
+    case 'lavada':
+      // Los nombres sí, porque son cosas que él escribió. El intervalo no:
+      // "hace tres semanas lavaste" es exactamente la vigilancia prohibida.
+      glyph = '≈'; color = 'var(--ocean)';
+      text = <>lavaste la ropa{Array.isArray(e.nombres) && e.nombres.length > 0 &&
+        <span className="ff-serif italic ml-1" style={{ color: 'var(--ink-soft)' }}>· {e.nombres.join(', ')}</span>}</>; break;
     case 'nota':
       glyph = '✎'; color = 'var(--ink-soft)';
       text = <span style={{ color: 'var(--ink-soft)' }} className="italic">{e.texto}</span>; break;
@@ -3071,7 +3598,7 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onDonateCam, onCreateC
   const [regla, setRegla] = useState('');
   const [falta, setFalta] = useState('');
   const [honesto, setHonesto] = useState('');   // A2: pregunta de honestidad, campo propio
-  const activas = cams.filter(c => !c.archived_at);
+  const activas = cams.filter(estaPuesta);
   const finish = () => onClose({
     honesto: honesto.trim(),
     notas: [
@@ -3104,10 +3631,10 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onDonateCam, onCreateC
             )}
           </div>
         ))}
-        {cams.filter(c => c.archived_at).length > 0 && (<details className="pt-4">
+        {cams.filter(c => !estaPuesta(c)).length > 0 && (<details className="pt-4">
           <summary className="smallcaps cursor-pointer" style={{ color: 'var(--ink-faint)' }}>recuperar del closet</summary>
           <div className="mt-2 space-y-1">
-            {cams.filter(c => c.archived_at).map(c => (
+            {cams.filter(c => !estaPuesta(c)).map(c => (
               <div key={c.id} className="flex items-center gap-3 py-1">
                 <span>{c.emoji}</span>
                 <span className="flex-1 ff-serif text-sm" style={{ color: 'var(--ink-faint)' }}>{c.nombre}</span>
