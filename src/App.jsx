@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Check, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home } from 'lucide-react';
+import { Plus, Check, X, GripVertical, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home } from 'lucide-react';
 import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encodeCamisetaToJSON, decodeJSONToCamiseta } from './codec/index.js';
 
 const STATE_KEY = 'juego-camisetas:state:v1';
@@ -8,8 +8,24 @@ const INSTALL_KEY = 'juego-camisetas:install-ack:v1';
 // que corre la migración v7 (una sola vez, nunca se sobrescribe).
 // IMPORT_BACKUP guarda lo que había antes de cada import manual.
 const BACKUP_PRE_V7_KEY = 'juego-camisetas:state:pre-v7';
+const BACKUP_PRE_V8_KEY = 'juego-camisetas:state:pre-v8';
 const IMPORT_BACKUP_KEY = 'juego-camisetas:state:import-backup';
 const DAY = 86400000;
+
+// ── v8: el clóset es un mueble ───────────────────────────────────────────
+// Cinco ganchos fijos (no configurables, a propósito: en el momento en que
+// sea un ajuste alguien lo sube a veinte) y cerros ilimitados. Cada camiseta
+// está en exactamente un sitio.
+const GANCHOS = 5;
+const CERRO_SIN_DOBLAR = 'sin-doblar';
+const cerroSistema = () => ({ id: CERRO_SIN_DOBLAR, nombre: 'sin doblar', orden: 0, esDelSistema: true });
+const PUESTA = () => ({ tipo: 'puesta' });
+const AL_SIN_DOBLAR = () => ({ tipo: 'cerro', cerroId: CERRO_SIN_DOBLAR });
+const estaPuesta = (c) => c?.ubicacion?.tipo === 'puesta';
+const enGancho = (c, i) => c?.ubicacion?.tipo === 'gancho' && c.ubicacion.posicion === i;
+const enCerro = (c, id) => c?.ubicacion?.tipo === 'cerro' && c.ubicacion.cerroId === id;
+const mismaUbicacion = (a, b) => !!a && !!b && a.tipo === b.tipo &&
+  a.posicion === b.posicion && a.cerroId === b.cerroId;
 
 // ¿Está corriendo ya instalada (desde el ícono del home), no en el navegador?
 function isStandalone() {
@@ -21,8 +37,9 @@ function isStandalone() {
 }
 
 const emptyState = () => ({
-  user_id: 'local', version: 7, created_at: new Date().toISOString(),
+  user_id: 'local', version: 8, created_at: new Date().toISOString(),
   camisetas: [], sesiones: [], eventos: [], movimientos: [], visitas: [],
+  cerros: [cerroSistema()],
 });
 
 async function loadState() {
@@ -36,6 +53,10 @@ async function loadState() {
       try {
         if ((parsed.version || 0) < 7 && !localStorage.getItem(BACKUP_PRE_V7_KEY)) {
           localStorage.setItem(BACKUP_PRE_V7_KEY, raw);
+        }
+        // v8: mismo seguro antes de repartir las camisetas por el mueble.
+        if ((parsed.version || 0) < 8 && !localStorage.getItem(BACKUP_PRE_V8_KEY)) {
+          localStorage.setItem(BACKUP_PRE_V8_KEY, raw);
         }
       } catch {}
       const s = migrate(parsed);
@@ -193,8 +214,91 @@ function migrate(s) {
       }
     });
   }
-  s.version = 7;
+  // v8 — el clóset deja de ser una lista y pasa a ser un mueble:
+  //   · s.cerros[]: montones con nombre. Uno del sistema, 'sin doblar',
+  //     que no se borra ni se renombra.
+  //   · cada camiseta gana ubicacion: puesta | gancho(0..4) | cerro(id).
+  // Va sin candado de versión y a propósito: no asume nada, valida lo que
+  // encuentra y solo escribe lo que falta o quedó inválido. Correrla dos
+  // veces no mueve una sola camiseta. Al salir de aquí ninguna camiseta
+  // puede quedar sin ubicación.
+  if (!Array.isArray(s.cerros)) s.cerros = [];
+  if (!s.cerros.some(c => c.id === CERRO_SIN_DOBLAR)) s.cerros.unshift(cerroSistema());
+  s.cerros.forEach((c, i) => {
+    if (typeof c.orden !== 'number') c.orden = i;
+    if (typeof c.esDelSistema !== 'boolean') c.esDelSistema = c.id === CERRO_SIN_DOBLAR;
+    if (c.id === CERRO_SIN_DOBLAR) c.esDelSistema = true;
+  });
+  {
+    const idsCerro = new Set(s.cerros.map(c => c.id));
+    const ganchoTomado = new Set();
+    s.camisetas?.forEach(cam => {
+      const u = cam.ubicacion;
+      let valida = false;
+      if (u?.tipo === 'puesta') valida = true;
+      else if (u?.tipo === 'gancho' && Number.isInteger(u.posicion) &&
+               u.posicion >= 0 && u.posicion < GANCHOS && !ganchoTomado.has(u.posicion)) {
+        ganchoTomado.add(u.posicion); valida = true;
+      } else if (u?.tipo === 'cerro' && idsCerro.has(u.cerroId)) valida = true;
+      // Primera corrida: lo que está archivado cae al cerro sin doblar, lo
+      // puesto sigue puesto, los cinco ganchos arrancan vacíos. Las donadas
+      // ya no están en el array, así que no se tocan.
+      if (!valida) cam.ubicacion = cam.archived_at ? AL_SIN_DOBLAR() : PUESTA();
+    });
+  }
+  s.version = 8;
   return s;
+}
+
+// Escribe un evento en la historia. Módulo, no closure: lo usan tanto los
+// handlers de App como aplicarMovida.
+const pushEvento = (s, ev) => { s.eventos.push({ id: uid(), ts: nowISO(), ...ev }); };
+
+// Una ubicación que existe de verdad. Un gancho fuera de rango o un cerro
+// borrado no dejan a la camiseta en el aire: caen al cerro sin doblar.
+function normalizarUbicacion(s, u) {
+  if (u?.tipo === 'puesta') return PUESTA();
+  if (u?.tipo === 'gancho' && Number.isInteger(u.posicion) && u.posicion >= 0 && u.posicion < GANCHOS) {
+    return { tipo: 'gancho', posicion: u.posicion };
+  }
+  if (u?.tipo === 'cerro' && s.cerros?.some(c => c.id === u.cerroId)) {
+    return { tipo: 'cerro', cerroId: u.cerroId };
+  }
+  return AL_SIN_DOBLAR();
+}
+
+// El único camino por el que una camiseta cambia de sitio. Guardar a mano,
+// arrastrar y lavar la ropa pasan todos por aquí: un solo camino, no dos.
+function aplicarMovida(s, camId, destino, opts = {}) {
+  const c = s.camisetas.find(x => x.id === camId);
+  if (!c) return false;
+  const antes = c.ubicacion;
+  const dest = normalizarUbicacion(s, destino);
+  if (mismaUbicacion(antes, dest)) return false;
+  // En un gancho no caben dos. Si la que llega venía de otro gancho, los dos
+  // se intercambian —eso es reordenar los ganchos entre sí—; si venía de
+  // fuera, la que estaba baja al cerro sin doblar.
+  if (dest.tipo === 'gancho') {
+    const ocupante = s.camisetas.find(x => x.id !== camId && enGancho(x, dest.posicion));
+    if (ocupante) {
+      const destinoOcupante = antes?.tipo === 'gancho' ? { ...antes } : AL_SIN_DOBLAR();
+      ocupante.ubicacion = normalizarUbicacion(s, destinoOcupante);
+      ocupante.archived_at = ocupante.archived_at || nowISO();
+    }
+  }
+  c.ubicacion = dest;
+  // archived_at deja de gobernar el estado —lo gobierna ubicacion— pero se
+  // mantiene fiel a lo que siempre significó: cuándo dejó de estar puesta.
+  c.archived_at = dest.tipo === 'puesta' ? null : (c.archived_at || nowISO());
+  if (opts.evento !== false) {
+    const eraPuesta = antes?.tipo === 'puesta';
+    const esPuesta = dest.tipo === 'puesta';
+    if (eraPuesta && !esPuesta) pushEvento(s, { tipo: 'camiseta_retirada', cam_id: c.id, nombre: c.nombre });
+    else if (!eraPuesta && esPuesta) pushEvento(s, { tipo: 'camiseta_recuperada', cam_id: c.id, nombre: c.nombre });
+    // Mover de un gancho a un cerro es acomodar el clóset, no cambiar de
+    // identidad. Eso no deja rastro en la historia.
+  }
+  return true;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 11);
@@ -425,12 +529,12 @@ export default function App() {
   }, [state]);
 
   const update = (mut) => setState(prev => { const n = structuredClone(prev); mut(n); return n; });
-  const pushEv = (s, ev) => { s.eventos.push({ id: uid(), ts: nowISO(), ...ev }); };
+  const pushEv = pushEvento;
   const pushMov = (s, mov) => { s.movimientos.push({ id: uid(), ts: nowISO(), ...mov }); };
 
   const addCamiseta = (data) => update(s => {
     const id = uid();
-    s.camisetas.push({ id, ...data, creador_id: s.user_id, origen: 'propia', origen_camiseta_id: null, precio: null, created_at: nowISO(), archived_at: null, misiones: [], milestones: [] });
+    s.camisetas.push({ id, ...data, creador_id: s.user_id, origen: 'propia', origen_camiseta_id: null, precio: null, created_at: nowISO(), archived_at: null, ubicacion: PUESTA(), misiones: [], milestones: [] });
     pushEv(s, { tipo: 'camiseta_creada', cam_id: id, nombre: data.nombre, emoji: data.emoji, esencia: data.esencia ?? '', arco: data.arco ?? null });
   });
   const recibirCamiseta = (molde) => {
@@ -455,6 +559,7 @@ export default function App() {
         precio: null,
         created_at: nowISO(),
         archived_at: null,
+        ubicacion: PUESTA(),
         misiones: (molde.misiones || []).map(m => ({
           id: uid(),
           nombre: m.nombre,
@@ -496,7 +601,7 @@ export default function App() {
         id: camId,
         nombre: cat.nombre, emoji: cat.emoji, esencia: cat.esencia, arco: cat.arco,
         creador_id: cat.creador_id, origen: 'comprada', origen_camiseta_id: cat.id, precio: cat.precio,
-        created_at: nowISO(), archived_at: null,
+        created_at: nowISO(), archived_at: null, ubicacion: PUESTA(),
         misiones: [], milestones: [],
       };
       cat.misiones.forEach(m => {
@@ -522,13 +627,45 @@ export default function App() {
     });
     return ok;
   };
-  const archiveCamiseta = (id) => update(s => {
-    const c = s.camisetas.find(c => c.id === id);
-    if (c) { c.archived_at = nowISO(); pushEv(s, { tipo: 'camiseta_retirada', cam_id: id, nombre: c.nombre }); }
+  // Guardar en el clóset = mandarla al cerro sin doblar. Ponérsela = sacarla.
+  // Las dos son la misma movida de siempre, con otro nombre.
+  const moverCamiseta = (id, destino) => update(s => { aplicarMovida(s, id, destino); });
+  const archiveCamiseta = (id) => update(s => { aplicarMovida(s, id, AL_SIN_DOBLAR()); });
+  const reviveCamiseta = (id) => update(s => { aplicarMovida(s, id, PUESTA()); });
+
+  // Lavar la ropa. Todas las puestas al cerro sin doblar, sin excepciones,
+  // sin confirmación y sin deshacer. Cada camiseta hace exactamente la misma
+  // transición que si la guardaras a mano —el mismo aplicarMovida—, pero la
+  // historia recibe un solo evento con los ids en vez de diecinueve.
+  const lavarLaRopa = () => update(s => {
+    const puestas = s.camisetas.filter(estaPuesta);
+    if (puestas.length === 0) return;
+    const ids = puestas.map(c => c.id);
+    const nombres = puestas.map(c => c.nombre);
+    ids.forEach(id => aplicarMovida(s, id, AL_SIN_DOBLAR(), { evento: false }));
+    // nombres junto a los ids por la misma razón que en v7: el id deja de
+    // resolver si la camiseta se dona después.
+    pushEv(s, { tipo: 'lavada', fecha: nowISO(), camisetas: ids, nombres });
   });
-  const reviveCamiseta = (id) => update(s => {
-    const c = s.camisetas.find(c => c.id === id);
-    if (c) { c.archived_at = null; pushEv(s, { tipo: 'camiseta_recuperada', cam_id: id, nombre: c.nombre }); }
+
+  const crearCerro = (nombre) => update(s => {
+    const n = (nombre || '').trim();
+    if (!n) return;
+    const orden = s.cerros.reduce((mx, c) => Math.max(mx, c.orden ?? 0), 0) + 1;
+    s.cerros.push({ id: uid(), nombre: n, orden, esDelSistema: false });
+  });
+  const renombrarCerro = (id, nombre) => update(s => {
+    const c = s.cerros.find(x => x.id === id);
+    const n = (nombre || '').trim();
+    if (!c || c.esDelSistema || !n) return;
+    c.nombre = n;
+  });
+  // Borrar un cerro devuelve sus camisetas al cerro sin doblar. No se pierde nada.
+  const borrarCerro = (id) => update(s => {
+    const c = s.cerros.find(x => x.id === id);
+    if (!c || c.esDelSistema) return;
+    s.camisetas.forEach(cam => { if (enCerro(cam, id)) aplicarMovida(s, cam.id, AL_SIN_DOBLAR(), { evento: false }); });
+    s.cerros = s.cerros.filter(x => x.id !== id);
   });
   // Donar: la camiseta sale de tu set de verdad (no al closet). Los movimientos
   // de puntos quedan intactos, así que conservas lo que ganaste, y el diario
@@ -732,7 +869,7 @@ export default function App() {
   };
 
   if (!state) return <Loading />;
-  const camsActivas = state.camisetas.filter(c => !c.archived_at);
+  const camsActivas = state.camisetas.filter(estaPuesta);
   const puntosUser = puntosTotales(state.movimientos);
 
   // Instructivo de instalación: lo primero que ve un usuario nuevo.
@@ -782,7 +919,7 @@ export default function App() {
     return <Frame><CatalogoPreview
       cat={cat}
       puntos={puntosUser}
-      yaTenida={state.camisetas.some(c => c.origen_camiseta_id === cat.id && !c.archived_at)}
+      yaTenida={state.camisetas.some(c => c.origen_camiseta_id === cat.id && estaPuesta(c))}
       onBack={() => setPreviewCat(null)}
       onComprar={() => {
         const newId = comprarCamiseta(cat.id);
@@ -828,7 +965,7 @@ export default function App() {
   return (<Frame><Header puntos={puntosUser} warn={state._saveError} />
     <main className="px-5 pb-32 pt-2 max-w-2xl mx-auto">
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
-      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onRevive={reviveCamiseta} />}
+      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion} />}
     </main>
     <QuickNoteButton onClick={() => setShowNota(true)} />
@@ -1066,7 +1203,7 @@ function Catalogo({ catalogo, camisetas, puntos, onPreview, onClose, onCrearProp
     </p>
     <div className="space-y-3 mb-10">
       {catalogo.map(cat => {
-        const ya = camisetas.some(c => c.origen_camiseta_id === cat.id && !c.archived_at);
+        const ya = camisetas.some(c => c.origen_camiseta_id === cat.id && estaPuesta(c));
         const puedePagar = puntos >= cat.precio;
         return (<button key={cat.id} onClick={() => onPreview(cat.id)}
           className="block w-full text-left p-5 ring-ink"
@@ -1403,42 +1540,328 @@ function MisionRow({ m, onToggle, onUndo }) {
   </div>);
 }
 
-function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, onImport, onReorder, onRevive }) {
-  const activas = cams.filter(c => !c.archived_at);
-  const archivadas = cams.filter(c => c.archived_at);
+// ── El mueble ────────────────────────────────────────────────────────────
+// El clóset dejó de ser una lista. Tres superficies: lo que llevas puesto,
+// cinco ganchos y los cerros. No son tres formas de ordenar: son tres formas
+// de decir cuánto te importa una camiseta ahora mismo.
+
+// Arrastrar con el dedo. El drag-and-drop nativo de HTML no existe en iOS y
+// este clóset vive en un iPhone, así que va con pointer events desde un
+// agarradero propio (touch-action: none) para no pelear con el scroll. Las
+// zonas donde se puede soltar se marcan con data-drop.
+function useArrastre(onSoltar, onTap) {
+  const [drag, setDrag] = useState(null);     // { cam, x, y, movido }
+  const [zona, setZona] = useState(null);
+  const st = useRef({});
+
+  // Autoscroll: el mueble no cabe en una pantalla. Sin esto no hay forma de
+  // llevar la camiseta 19 hasta un gancho. Va por intervalo y no por evento
+  // porque el dedo puede quedarse quieto en el borde.
+  useEffect(() => {
+    if (!drag) return;
+    const id = setInterval(() => { if (st.current.dir) window.scrollBy(0, st.current.dir * 12); }, 16);
+    return () => clearInterval(id);
+  }, [!!drag]);
+
+  useEffect(() => {
+    if (!drag) return;
+    const mover = (e) => {
+      const x = e.clientX, y = e.clientY;
+      const movido = Math.hypot(x - st.current.x0, y - st.current.y0) > 6;
+      const el = document.elementFromPoint(x, y)?.closest?.('[data-drop]');
+      st.current.zona = movido ? (el?.dataset?.drop ?? null) : null;
+      st.current.movido = movido;
+      st.current.dir = !movido ? 0 : y < 100 ? -1 : y > window.innerHeight - 100 ? 1 : 0;
+      setZona(st.current.zona);
+      setDrag(d => d && { ...d, x, y, movido });
+    };
+    const soltar = () => {
+      const { movido, zona: z, cam } = st.current;
+      st.current.dir = 0;
+      setDrag(null); setZona(null);
+      // Soltar sin haber movido el dedo es un toque en el agarradero: en vez
+      // de arrastrar, se abre la lista de sitios. Misma intención, otra mano.
+      if (!movido) { onTap?.(cam); return; }
+      if (z) onSoltar(cam, z);
+    };
+    window.addEventListener('pointermove', mover);
+    window.addEventListener('pointerup', soltar);
+    window.addEventListener('pointercancel', soltar);
+    return () => {
+      window.removeEventListener('pointermove', mover);
+      window.removeEventListener('pointerup', soltar);
+      window.removeEventListener('pointercancel', soltar);
+    };
+  }, [drag?.cam?.id]);
+
+  const agarrar = (e, cam) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    st.current = { x0: e.clientX, y0: e.clientY, cam, zona: null, movido: false, dir: 0 };
+    setDrag({ cam, x: e.clientX, y: e.clientY, movido: false });
+  };
+
+  const fantasma = drag && drag.movido ? (
+    <div className="fixed pointer-events-none ff-serif flex items-center gap-2 px-3 py-2"
+      style={{
+        left: drag.x, top: drag.y, transform: 'translate(-50%, -50%) rotate(-2deg)',
+        zIndex: 200, background: 'var(--bg-card)', border: '1px solid var(--ink)',
+        borderRadius: 2, boxShadow: '0 6px 18px rgba(28,24,19,0.22)', opacity: 0.95,
+      }}>
+      <span className="text-xl">{drag.cam.emoji}</span>
+      <span className="text-base">{drag.cam.nombre}</span>
+    </div>
+  ) : null;
+
+  return { agarrar, fantasma, zona, arrastrando: drag?.movido ? drag.cam.id : null };
+}
+
+function Agarradero({ onPointerDown, label }) {
+  return (
+    <button onPointerDown={onPointerDown}
+      className="ring-ink px-2 flex items-center justify-center"
+      style={{ touchAction: 'none', color: 'var(--ink-faint)', cursor: 'grab' }}
+      aria-label={label}>
+      <GripVertical size={16} strokeWidth={1.5} />
+    </button>
+  );
+}
+
+// La lista de sitios, para cuando arrastrar no es cómodo o no es posible.
+function MoverSheet({ cam, cerros, cams, onMover, onClose }) {
+  const ocupante = (i) => cams.find(c => c.id !== cam.id && enGancho(c, i));
+  const ir = (u) => { onMover(cam.id, u); onClose(); };
+  return (<div className="fixed inset-0 flex items-end justify-center" style={{ zIndex: 150, background: 'rgba(28,24,19,0.35)' }} onClick={onClose}>
+    <div className="w-full max-w-xl p-5 fade-up" style={{ background: 'var(--bg)', borderTop: '1px solid var(--line)', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+      <div className="flex items-baseline justify-between mb-4">
+        <span className="ff-serif text-lg">{cam.emoji} {cam.nombre}</span>
+        <button onClick={onClose} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Cerrar"><X size={16} /></button>
+      </div>
+      <div className="grid gap-1">
+        {!estaPuesta(cam) && (
+          <button onClick={() => ir(PUESTA())} className="text-left ring-ink py-2 px-3 ff-serif"
+            style={{ border: '1px solid var(--line-soft)' }}>ponérmela</button>
+        )}
+        {Array.from({ length: GANCHOS }, (_, i) => {
+          const oc = ocupante(i);
+          if (enGancho(cam, i)) return null;
+          return (<button key={i} onClick={() => ir({ tipo: 'gancho', posicion: i })}
+            className="text-left ring-ink py-2 px-3 ff-serif flex items-baseline gap-2"
+            style={{ border: '1px solid var(--line-soft)' }}>
+            <span>gancho {i + 1}</span>
+            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>
+              {oc ? `· ocupado por ${oc.nombre}` : '· libre'}
+            </span>
+          </button>);
+        })}
+        {cerros.map(k => enCerro(cam, k.id) ? null : (
+          <button key={k.id} onClick={() => ir({ tipo: 'cerro', cerroId: k.id })}
+            className="text-left ring-ink py-2 px-3 ff-serif flex items-baseline gap-2"
+            style={{ border: '1px solid var(--line-soft)' }}>
+            <span>{k.nombre}</span>
+            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>
+              · {cams.filter(c => enCerro(c, k.id)).length}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  </div>);
+}
+
+function FilaCamiseta({ cam, agarrar, onOpen, atenuada, compacta }) {
+  return (<div className="flex items-stretch" style={{
+    background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2,
+    opacity: atenuada ? 0.35 : 1,
+  }}>
+    <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
+    <button onClick={() => onOpen(cam.id)} className={`text-left ring-ink flex-1 ${compacta ? 'py-2 pr-3' : 'p-4'}`}>
+      <div className="flex items-center gap-3">
+        <span className={compacta ? 'text-xl' : 'text-2xl'}>{cam.emoji}</span>
+        <span className={`ff-serif flex-1 ${compacta ? 'text-base' : 'text-lg'}`}>{cam.nombre}</span>
+        <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
+      </div>
+    </button>
+  </div>);
+}
+
+function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCatalogo, onImport,
+                        onReorder, onMover, onLavar, onCrearCerro, onRenombrarCerro, onBorrarCerro }) {
+  const [abiertos, setAbiertos] = useState(() => new Set());
+  const [creandoCerro, setCreandoCerro] = useState(false);
+  const [nombreCerro, setNombreCerro] = useState('');
+  const [renombrando, setRenombrando] = useState(null);
+  const [borrando, setBorrando] = useState(null);
+  const [moviendo, setMoviendo] = useState(null);
+
+  const { agarrar, fantasma, zona, arrastrando } = useArrastre(
+    (cam, destino) => {
+      const [tipo, arg] = destino.split(':');
+      if (tipo === 'puesta') onMover(cam.id, PUESTA());
+      else if (tipo === 'gancho') onMover(cam.id, { tipo: 'gancho', posicion: Number(arg) });
+      else if (tipo === 'cerro') onMover(cam.id, { tipo: 'cerro', cerroId: arg });
+    },
+    (cam) => setMoviendo(cam.id),
+  );
+
+  const puestas = cams.filter(estaPuesta);
+  const ordenados = [...cerros].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+  const toggleCerro = (id) => setAbiertos(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+  // Estilo de una zona cuando el dedo está encima: el sitio se enciende.
+  const marco = (clave) => zona === clave
+    ? { borderColor: 'var(--ink)', background: 'var(--bg-card)' }
+    : { borderColor: 'var(--line-soft)' };
+
+  const camMoviendo = moviendo ? cams.find(c => c.id === moviendo) : null;
+
   return (<div className="fade-up">
+    {fantasma}
+    {camMoviendo && <MoverSheet cam={camMoviendo} cerros={ordenados} cams={cams}
+      onMover={onMover} onClose={() => setMoviendo(null)} />}
+
     <div className="flex items-baseline justify-between mb-6">
-      <p className="ff-serif italic text-lg" style={{ color: 'var(--ink-soft)' }}>
-        Tu mazo. {activas.length} {activas.length === 1 ? 'camiseta' : 'camisetas'} en juego.
-      </p>
+      <p className="ff-serif italic text-lg" style={{ color: 'var(--ink-soft)' }}>Tu clóset.</p>
       <div className="flex gap-1">
         <button onClick={onOpenCatalogo} className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>catálogo</button>
         <button onClick={onImport} className="ring-ink p-2" style={{ color: 'var(--ink-soft)' }} aria-label="Recibir camiseta"><Inbox size={20} strokeWidth={1.5} /></button>
         <button onClick={onCreate} className="ring-ink p-2" style={{ color: 'var(--ink-soft)' }} aria-label="Crear camiseta"><Plus size={20} strokeWidth={1.5} /></button>
       </div>
     </div>
-    <div className="grid gap-3">
-      {activas.map((cam, i) => {
+
+    {/* ── Ganchos ── cinco, fijos. Un gancho libre es información, así que
+        se dibuja vacío en vez de desaparecer. */}
+    <div className="smallcaps mb-3" style={{ color: 'var(--ink-faint)' }}>Ganchos</div>
+    <div className="grid gap-2 mb-10">
+      {Array.from({ length: GANCHOS }, (_, i) => {
+        const cam = cams.find(c => enGancho(c, i));
+        return (<div key={i} data-drop={`gancho:${i}`}
+          style={{ border: cam ? '1px solid' : '1px dashed', borderRadius: 2, ...marco(`gancho:${i}`) }}>
+          {cam ? (
+            <div className="flex items-stretch" style={{ opacity: arrastrando === cam.id ? 0.35 : 1 }}>
+              <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
+              <button onClick={() => onOpen(cam.id)} className="text-left ring-ink flex-1 py-3 pr-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{cam.emoji}</span>
+                  <span className="ff-serif text-lg flex-1">{cam.nombre}</span>
+                  <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
+                </div>
+              </button>
+            </div>
+          ) : (
+            <div className="py-4 px-4 ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>gancho libre</div>
+          )}
+        </div>);
+      })}
+    </div>
+
+    {/* ── Cerros ── montones con nombre. Por dentro no se ordenan. */}
+    <div className="flex items-baseline justify-between mb-3">
+      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Cerros</span>
+      {!creandoCerro && (
+        <button onClick={() => { setCreandoCerro(true); setNombreCerro(''); }}
+          className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>
+          nuevo cerro
+        </button>
+      )}
+    </div>
+    {creandoCerro && (
+      <div className="flex gap-2 mb-3 fade-up">
+        <input value={nombreCerro} onChange={e => setNombreCerro(e.target.value)} autoFocus
+          placeholder="nombre del cerro"
+          onKeyDown={e => { if (e.key === 'Enter' && nombreCerro.trim()) { onCrearCerro(nombreCerro); setCreandoCerro(false); } if (e.key === 'Escape') setCreandoCerro(false); }}
+          className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+        <button onClick={() => { if (nombreCerro.trim()) onCrearCerro(nombreCerro); setCreandoCerro(false); }}
+          className="ring-ink ff-mono text-xs px-3" style={{ border: '1px solid var(--ink)' }}>crear</button>
+        <button onClick={() => setCreandoCerro(false)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={16} /></button>
+      </div>
+    )}
+    <div className="grid gap-2 mb-10">
+      {ordenados.map(k => {
+        const dentro = cams.filter(c => enCerro(c, k.id));
+        const abierto = abiertos.has(k.id);
+        return (<div key={k.id} data-drop={`cerro:${k.id}`}
+          style={{ border: '1px solid', borderRadius: 2, background: 'var(--bg-card)', ...marco(`cerro:${k.id}`) }}>
+          {renombrando === k.id ? (
+            <div className="flex gap-2 p-3">
+              <input defaultValue={k.nombre} autoFocus
+                onKeyDown={e => { if (e.key === 'Enter') { onRenombrarCerro(k.id, e.target.value); setRenombrando(null); } if (e.key === 'Escape') setRenombrando(null); }}
+                onBlur={e => { onRenombrarCerro(k.id, e.target.value); setRenombrando(null); }}
+                className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+            </div>
+          ) : (
+            <div className="flex items-center">
+              <button onClick={() => toggleCerro(k.id)} className="text-left ring-ink flex-1 py-3 px-4">
+                <div className="flex items-baseline gap-2">
+                  <span className="ff-serif text-lg flex-1">{k.nombre}</span>
+                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{dentro.length}</span>
+                  {abierto ? <ChevronUp size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
+                           : <ChevronDown size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />}
+                </div>
+              </button>
+              {!k.esDelSistema && (borrando === k.id ? (
+                <div className="flex items-center gap-2 pr-3 fade-up">
+                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>¿borrar?</span>
+                  <button onClick={() => { onBorrarCerro(k.id); setBorrando(null); }} className="ring-ink ff-mono text-xs px-2 py-0.5" style={{ color: 'var(--accent)', border: '1px solid var(--accent-soft)' }}>sí</button>
+                  <button onClick={() => setBorrando(null)} className="ring-ink ff-mono text-xs px-2 py-0.5" style={{ color: 'var(--ink-faint)' }}>no</button>
+                </div>
+              ) : (
+                <div className="flex items-center pr-2">
+                  <button onClick={() => setRenombrando(k.id)} className="ring-ink p-2" style={{ color: 'var(--ink-faint)' }} aria-label={`Renombrar ${k.nombre}`}><Edit2 size={14} strokeWidth={1.5} /></button>
+                  <button onClick={() => setBorrando(k.id)} className="ring-ink p-2" style={{ color: 'var(--ink-faint)' }} aria-label={`Borrar ${k.nombre}`}><Trash2 size={14} strokeWidth={1.5} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          {abierto && (
+            <div className="grid gap-1 px-3 pb-3">
+              {dentro.length === 0
+                ? <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Vacío.</p>
+                : dentro.map(cam => <FilaCamiseta key={cam.id} cam={cam} agarrar={agarrar}
+                    onOpen={onOpen} atenuada={arrastrando === cam.id} compacta />)}
+            </div>
+          )}
+        </div>);
+      })}
+    </div>
+
+    {/* ── Puestas ── sin límite, a propósito. La salida es lavar la ropa. */}
+    <div className="flex items-baseline justify-between mb-3">
+      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Puestas</span>
+      <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{puestas.length}</span>
+    </div>
+    <div data-drop="puesta" className="grid gap-3 pb-2"
+      style={{ border: '1px solid', borderRadius: 2, padding: puestas.length ? 0 : 16,
+               ...(zona === 'puesta' ? { borderColor: 'var(--ink)' } : { borderColor: 'transparent' }) }}>
+      {puestas.length === 0 && (
+        <p className="ff-serif italic" style={{ color: 'var(--ink-faint)' }}>
+          No llevas nada puesto. Baja algo de un gancho o de un cerro.
+        </p>
+      )}
+      {puestas.map((cam, i) => {
         const act = cam.misiones.filter(m => enJuego(m)).length;
         const hechasTot = cam.misiones.reduce((acc, m) => acc + (m.completed_at ? 1 : 0) + (m.completions?.length || 0), 0);
         const puntosTot = puntosCamiseta(movimientos, cam.id);
-        const canUp = i > 0;
-        const canDown = i < activas.length - 1;
-        return (<div key={cam.id} className="flex" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2 }}>
-          {activas.length > 1 && (
-            <div className="flex flex-col border-r" style={{ borderColor: 'var(--line-soft)' }}>
-              <button onClick={() => onReorder(cam.id, -1)} disabled={!canUp}
-                className="ring-ink p-1.5 disabled:opacity-20"
-                style={{ color: 'var(--ink-faint)' }} aria-label="Subir camiseta">
+        return (<div key={cam.id} className="flex" style={{
+          background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2,
+          opacity: arrastrando === cam.id ? 0.35 : 1,
+        }}>
+          <div className="flex flex-col items-center justify-center border-r" style={{ borderColor: 'var(--line-soft)' }}>
+            {puestas.length > 1 && (
+              <button onClick={() => onReorder(cam.id, -1)} disabled={i === 0}
+                className="ring-ink p-1.5 disabled:opacity-20" style={{ color: 'var(--ink-faint)' }} aria-label="Subir camiseta">
                 <ChevronUp size={16} strokeWidth={1.5} />
               </button>
-              <button onClick={() => onReorder(cam.id, +1)} disabled={!canDown}
-                className="ring-ink p-1.5 disabled:opacity-20"
-                style={{ color: 'var(--ink-faint)' }} aria-label="Bajar camiseta">
+            )}
+            <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
+            {puestas.length > 1 && (
+              <button onClick={() => onReorder(cam.id, +1)} disabled={i === puestas.length - 1}
+                className="ring-ink p-1.5 disabled:opacity-20" style={{ color: 'var(--ink-faint)' }} aria-label="Bajar camiseta">
                 <ChevronDown size={16} strokeWidth={1.5} />
               </button>
-            </div>
-          )}
+            )}
+          </div>
           <button onClick={() => onOpen(cam.id)} className="text-left p-5 ring-ink flex-1">
             <div className="flex items-start gap-4">
               <span className="text-3xl">{cam.emoji}</span>
@@ -1457,32 +1880,16 @@ function CamisetasView({ cams, movimientos, onOpen, onCreate, onOpenCatalogo, on
         </div>);
       })}
     </div>
-    {archivadas.length > 0 && (<>
-      <div className="mt-12 mb-2 flex items-baseline justify-between">
-        <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Closet</span>
-        <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{archivadas.length} {archivadas.length === 1 ? 'camiseta' : 'camisetas'}</span>
-      </div>
-      <p className="ff-serif italic text-sm mb-4" style={{ color: 'var(--ink-faint)' }}>Visibles, fuera del juego. Las puedes volver al mazo cuando quieras.</p>
-      <div className="grid gap-3">
-        {archivadas.map(cam => (
-          <div key={cam.id} className="flex" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2, opacity: 0.7 }}>
-            <button onClick={() => onRevive(cam.id)}
-              className="ring-ink px-3 flex items-center justify-center border-r"
-              style={{ borderColor: 'var(--line-soft)', color: 'var(--moss)' }}
-              aria-label="Devolver al mazo">
-              <RotateCcw size={16} strokeWidth={1.5} />
-            </button>
-            <button onClick={() => onOpen(cam.id)} className="text-left p-4 ring-ink flex-1">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{cam.emoji}</span>
-                <span className="ff-serif text-lg flex-1">{cam.nombre}</span>
-                <ChevronRight size={18} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
-              </div>
-            </button>
-          </div>
-        ))}
-      </div>
-    </>)}
+
+    {/* Lavar la ropa. Al final de la lista, que es donde llega el agobio.
+        Sin confirmación y sin deshacer: no destruye nada, y preguntarle
+        "¿estás seguro?" a alguien agobiado es insufrible. */}
+    {puestas.length > 0 && (
+      <button onClick={onLavar} className="w-full ring-ink ff-serif text-lg py-4 mt-6"
+        style={{ border: '1px solid var(--ink)', color: 'var(--ink)' }}>
+        lavar la ropa
+      </button>
+    )}
   </div>);
 }
 
@@ -1679,7 +2086,7 @@ function CamisetaDetail({ cam, movimientos, onBack, onAddMision, onEditMision, o
     </div>
     <h1 className="display text-4xl md:text-5xl mb-2">
       {cam.nombre}
-      {cam.archived_at && <span className="ff-mono text-xs ml-3 align-middle" style={{ color: 'var(--ink-faint)' }}>en closet</span>}
+      {!estaPuesta(cam) && <span className="ff-mono text-xs ml-3 align-middle" style={{ color: 'var(--ink-faint)' }}>en el clóset</span>}
     </h1>
     {cam.arco && (<div className="ff-mono text-xs mb-3" style={{ color: 'var(--ink-soft)' }}>
       {cam.arco.de} <span style={{ color: 'var(--ink-faint)' }}>→</span> {cam.arco.a}
@@ -1785,7 +2192,7 @@ function CamisetaDetail({ cam, movimientos, onBack, onAddMision, onEditMision, o
           onShare={() => setSharing(true)}
           onDonate={(ded) => onDonateCam(ded)}
           onCancel={() => setConfirmDonar(false)} />
-      ) : !cam.archived_at ? (
+      ) : estaPuesta(cam) ? (
         confirmRetiro ? (
           <div className="flex items-center gap-3 fade-up">
             <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-soft)' }}>¿«{cam.nombre}» al closet?</span>
@@ -2496,7 +2903,7 @@ function BackupTools({ state }) {
 
 function Heatmap({ state }) {
   const [rango, setRango] = useState(7);
-  const cams = state.camisetas.filter(c => !c.archived_at);
+  const cams = state.camisetas.filter(estaPuesta);
   if (cams.length === 0) return null;
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -2767,6 +3174,12 @@ function EventoItem({ e, cam, lookupCam }) {
     case 'sesion_mensual':
       glyph = '☾'; color = 'var(--accent)';
       text = <strong>observador del observador</strong>; break;
+    case 'lavada':
+      // Los nombres sí, porque son cosas que él escribió. El intervalo no:
+      // "hace tres semanas lavaste" es exactamente la vigilancia prohibida.
+      glyph = '≈'; color = 'var(--ocean)';
+      text = <>lavaste la ropa{Array.isArray(e.nombres) && e.nombres.length > 0 &&
+        <span className="ff-serif italic ml-1" style={{ color: 'var(--ink-soft)' }}>· {e.nombres.join(', ')}</span>}</>; break;
     case 'nota':
       glyph = '✎'; color = 'var(--ink-soft)';
       text = <span style={{ color: 'var(--ink-soft)' }} className="italic">{e.texto}</span>; break;
@@ -3071,7 +3484,7 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onDonateCam, onCreateC
   const [regla, setRegla] = useState('');
   const [falta, setFalta] = useState('');
   const [honesto, setHonesto] = useState('');   // A2: pregunta de honestidad, campo propio
-  const activas = cams.filter(c => !c.archived_at);
+  const activas = cams.filter(estaPuesta);
   const finish = () => onClose({
     honesto: honesto.trim(),
     notas: [
@@ -3104,10 +3517,10 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onDonateCam, onCreateC
             )}
           </div>
         ))}
-        {cams.filter(c => c.archived_at).length > 0 && (<details className="pt-4">
+        {cams.filter(c => !estaPuesta(c)).length > 0 && (<details className="pt-4">
           <summary className="smallcaps cursor-pointer" style={{ color: 'var(--ink-faint)' }}>recuperar del closet</summary>
           <div className="mt-2 space-y-1">
-            {cams.filter(c => c.archived_at).map(c => (
+            {cams.filter(c => !estaPuesta(c)).map(c => (
               <div key={c.id} className="flex items-center gap-3 py-1">
                 <span>{c.emoji}</span>
                 <span className="flex-1 ff-serif text-sm" style={{ color: 'var(--ink-faint)' }}>{c.nombre}</span>
