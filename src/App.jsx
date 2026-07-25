@@ -309,13 +309,18 @@ const FORMAS = [
   { id: 'facil',      label: 'fácil',      hint: 'minutos, simple',     puntosBase: 1, glyph: '·' },
   { id: 'recurrente', label: 'recurrente', hint: 'hábito que vuelve',   puntosBase: 2, glyph: '⟳' },
 ];
+// Los colores son los que el codec ya le pinta a cada tono en la camiseta
+// (TONO_COLORS en src/codec/index.js). Una misión física es magenta acá y
+// magenta en la prenda: el app y la obra hablan el mismo idioma de color.
+// 'estratégica' no tiene color en el codec; toma el naranja de los motivos.
 const TONOS = [
-  { id: 'profunda',    label: 'profunda' },
-  { id: 'fisica',      label: 'física' },
-  { id: 'emocional',   label: 'emocional' },
-  { id: 'creativa',    label: 'creativa' },
-  { id: 'estrategica', label: 'estratégica' },
+  { id: 'profunda',    label: 'profunda',    color: '#8900FD' },
+  { id: 'fisica',      label: 'física',      color: '#DA1895' },
+  { id: 'emocional',   label: 'emocional',   color: '#0DEDF7' },
+  { id: 'creativa',    label: 'creativa',    color: '#F4FF01' },
+  { id: 'estrategica', label: 'estratégica', color: '#FF9E01' },
 ];
+const colorTono = (id) => TONOS.find(t => t.id === id)?.color || 'var(--ink-faint)';
 const SUGERENCIAS_EMOJI = ['🧭','⚓','🎭','🌱','🪶','🔥','🗺️','🦴','🪞','🎯','🪐','🪨','🌊','🏛️','📜','🜃'];
 
 // Catálogo curado por Dumpa. Estas son las camisetas pre-establecidas que un nuevo
@@ -670,16 +675,20 @@ export default function App() {
   // Donar: la camiseta sale de tu set de verdad (no al closet). Los movimientos
   // de puntos quedan intactos, así que conservas lo que ganaste, y el diario
   // guarda el registro. La copia limpia se comparte aparte, vía ShareSheet (molde).
-  const donarCamiseta = (id, dedicatoria) => update(s => {
-    const c = s.camisetas.find(c => c.id === id);
-    if (!c) return;
-    const ded = (dedicatoria || '').trim();
-    // v7: la camiseta sale del array — el snapshot conserva sus textos y estado.
-    pushEv(s, { tipo: 'camiseta_donada', cam_id: id, nombre: c.nombre, emoji: c.emoji, dedicatoria: ded || undefined,
-      snapshot: { esencia: c.esencia ?? '', arco: c.arco ?? null,
-        misiones: (c.misiones || []).map(m => ({ id: m.id, nombre: m.nombre, forma: m.forma, estado: m.estado, completions: [...(m.completions || [])] })),
-        milestones: (c.milestones || []).map(ms => ({ id: ms.id, nombre: ms.nombre, regalo: ms.regalo ?? '', estado: ms.estado })) } });
-    s.camisetas = s.camisetas.filter(x => x.id !== id);
+  const donarCamiseta = (id, dedicatoria) => update(s => { aplicarDonacion(s, id, dedicatoria); });
+
+  // Donar un cerro entero. El cerro ya es la selección, así que no hay
+  // selección múltiple que construir. Cada camiseta se va por el mismo
+  // camino que si la donaras sola —un solo camino, no dos—, sin dedicatoria
+  // y sin compartir: un cerro no se le manda a nadie, se suelta. El cerro
+  // vacío desaparece con él; el del sistema se queda, vacío.
+  const donarCerro = (cerroId) => update(s => {
+    const k = s.cerros.find(x => x.id === cerroId);
+    if (!k) return;
+    const ids = s.camisetas.filter(c => enCerro(c, cerroId)).map(c => c.id);
+    if (ids.length === 0) return;
+    ids.forEach(id => aplicarDonacion(s, id, ''));
+    if (!k.esDelSistema) s.cerros = s.cerros.filter(x => x.id !== cerroId);
   });
   const editCamiseta = (id, data) => update(s => {
     const c = s.camisetas.find(c => c.id === id);
@@ -965,7 +974,7 @@ export default function App() {
   return (<Frame><Header puntos={puntosUser} warn={state._saveError} />
     <main className="px-5 pb-32 pt-2 max-w-2xl mx-auto">
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
-      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} />}
+      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion} />}
     </main>
     <QuickNoteButton onClick={() => setShowNota(true)} />
@@ -1025,31 +1034,68 @@ function Frame({ children }) {
   return (
     <div className="min-h-screen w-full" style={{ background: 'var(--bg)', color: 'var(--ink)' }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..700&family=JetBrains+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
+        /* La paleta no se inventó aquí: son los colores que el codec ya usa
+           para dibujar las camisetas (src/codec/index.js). Los cuatro tonos,
+           los motivos, el trazo y el papel. El app es el negativo de la obra:
+           lo que allá es papel, acá es tinta. */
         :root {
-          --bg: #F2EBDD; --bg-card: #EBE2D0;
-          --ink: #1C1813; --ink-soft: #5C5147; --ink-faint: #8A7E70;
-          --line: #C9BCA6; --line-soft: #D9CFBC;
-          --accent: #8B2D1C; --accent-soft: #B5614E;
-          --ocean: #2D4A6B; --moss: #5C7048; --gold: #A07E2B; --warm: #C77A3A;
-          --grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.11, 0 0 0 0 0.09, 0 0 0 0 0.07, 0 0 0 0.08 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+          --void: #0a0a0a; --papel: #F0E5D0;
+          --magenta: #DA1895;   /* tono física   */
+          --cian:    #0DEDF7;   /* tono emocional */
+          --acido:   #F4FF01;   /* tono creativa  */
+          --violeta: #8900FD;   /* tono profunda  */
+          --lima:    #37FF14; --naranja: #FF9E01; --rojo: #F3144D;
+          --violeta-luz: #B571FF;   /* el violeta puro es muy oscuro sobre negro */
+
+          --bg: #0a0a0a; --bg-card: #15111F;
+          --ink: #F0E5D0; --ink-soft: #B9AE99; --ink-faint: #7B7490;
+          --line: #3B3350; --line-soft: #241E33;
+          --accent: #F3144D; --accent-soft: #DA1895;
+          --ocean: #0DEDF7; --moss: #37FF14; --gold: #F4FF01; --warm: #FF9E01;
         }
-        body { font-family: 'Fraunces', Georgia, serif; }
-        .ff-serif { font-family: 'Fraunces', Georgia, serif; }
-        .ff-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-        .grain::before { content: ''; position: fixed; inset: 0; pointer-events: none; background-image: var(--grain); opacity: 0.5; mix-blend-mode: multiply; z-index: 100; }
-        .display { font-variation-settings: 'opsz' 144, 'SOFT' 50; font-weight: 350; letter-spacing: -0.02em; }
-        .smallcaps { text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.7rem; font-weight: 500; }
+        body { font-family: 'Chakra Petch', system-ui, sans-serif; }
+        .ff-serif { font-family: 'Chakra Petch', system-ui, sans-serif; }
+        .ff-mono { font-family: 'Space Mono', ui-monospace, monospace; }
+        /* La firma: aberración cromática. Es literalmente el mismo gesto que
+           el codec le hace a la silueta de la camiseta —una copia cian
+           desplazada y una magenta al otro lado— aplicado a los titulares. */
+        .display {
+          font-family: 'Chakra Petch', system-ui, sans-serif;
+          font-weight: 700; letter-spacing: -0.01em; line-height: 1.05;
+          text-shadow: 1.5px 0 rgba(13,237,247,0.85), -1.5px 1px rgba(218,24,149,0.85);
+        }
+        .smallcaps { font-family: 'Space Mono', ui-monospace, monospace;
+          text-transform: uppercase; letter-spacing: 0.22em; font-size: 0.68rem; font-weight: 700; }
+        /* Trama de tubo: líneas de barrido y un halo violeta arriba. Sustituye
+           al grano de papel, que era de la otra vida del app. */
+        .grain::before {
+          content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 100;
+          background:
+            repeating-linear-gradient(to bottom, rgba(240,229,208,0.035) 0 1px, transparent 1px 3px),
+            radial-gradient(120% 70% at 50% -10%, rgba(137,0,253,0.20), transparent 62%),
+            radial-gradient(100% 60% at 50% 110%, rgba(13,237,247,0.07), transparent 60%);
+        }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
         .fade-up { animation: fadeUp 0.4s ease both; }
         .fade-up-d1 { animation: fadeUp 0.4s ease both 0.08s; opacity: 0; }
         .fade-up-d2 { animation: fadeUp 0.4s ease both 0.16s; opacity: 0; }
         .fade-up-d3 { animation: fadeUp 0.4s ease both 0.24s; opacity: 0; }
-        .ring-ink:focus { outline: 2px solid var(--ink); outline-offset: 2px; }
+        .ring-ink:focus-visible { outline: 2px solid var(--cian); outline-offset: 2px; }
         .check-ani { transition: all 0.25s cubic-bezier(.34,1.6,.6,1); }
         .hr-deco { background-image: radial-gradient(circle, var(--line) 1px, transparent 1.5px); background-size: 8px 8px; background-repeat: repeat-x; background-position: center; height: 8px; }
-        textarea, input { background: transparent; }
+        .boton-neon { color: var(--cian); border: 1px solid var(--cian); background: transparent;
+          transition: background 0.18s ease, box-shadow 0.18s ease; }
+        .boton-neon:active { background: rgba(13,237,247,0.12); box-shadow: 0 0 26px -6px var(--cian); }
+        .aberracion-caja { box-shadow: 3px 0 0 -1px var(--magenta), -3px 0 0 -1px var(--cian), 0 10px 30px rgba(0,0,0,0.75); }
+        textarea, input, select { background: transparent; color: var(--ink); caret-color: var(--cian); }
+        input::placeholder, textarea::placeholder { color: var(--ink-faint); opacity: 1; }
+        ::selection { background: var(--magenta); color: var(--void); }
         details summary::-webkit-details-marker { display: none; }
+        @media (prefers-reduced-motion: reduce) {
+          .fade-up, .fade-up-d1, .fade-up-d2, .fade-up-d3 { animation: none; opacity: 1; }
+          .check-ani { transition: none; }
+        }
       `}</style>
       <div className="grain" />
       {children}
@@ -1057,7 +1103,7 @@ function Frame({ children }) {
   );
 }
 
-function Loading() { return <div className="min-h-screen flex items-center justify-center" style={{ background: '#F2EBDD' }}><span className="ff-mono text-sm" style={{ color: '#8A7E70' }}>cargando…</span></div>; }
+function Loading() { return <div className="min-h-screen flex items-center justify-center" style={{ background: '#0a0a0a' }}><span className="ff-mono text-sm" style={{ color: '#7B7490', letterSpacing: '0.2em' }}>cargando…</span></div>; }
 
 function Header({ puntos, warn }) {
   return (<header className="px-5 pt-6 pb-3 max-w-2xl mx-auto">
@@ -1253,7 +1299,9 @@ function CatalogoPreview({ cat, puntos, yaTenida, onBack, onComprar }) {
           <span className="ff-mono text-xs mt-1" style={{ color: 'var(--ink-faint)' }}>{FORMAS.find(f => f.id === m.forma)?.glyph}</span>
           <span className="flex-1 ff-serif text-base">{m.nombre}
             <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>
-              {m.forma}{m.tonos?.length ? ' · ' + m.tonos.map(t => TONOS.find(x => x.id === t)?.label).join(' · ') : ''}
+              {m.forma}{m.tonos?.map(t => (
+                <span key={t}> · <span style={{ color: colorTono(t) }}>{TONOS.find(x => x.id === t)?.label}</span></span>
+              ))}
             </span>
           </span>
           <span className="ff-mono text-xs mt-1" style={{ color: 'var(--gold)' }}>+{m.puntos_base}</span>
@@ -1540,6 +1588,48 @@ function MisionRow({ m, onToggle, onUndo }) {
   </div>);
 }
 
+// Donar es una sola cosa, pase por donde pase: la camiseta sale del array y
+// el evento conserva sus textos. Lo usan el ritual de una y el de un cerro.
+function aplicarDonacion(s, camId, dedicatoria) {
+  const c = s.camisetas.find(x => x.id === camId);
+  if (!c) return false;
+  const ded = (dedicatoria || '').trim();
+  pushEvento(s, { tipo: 'camiseta_donada', cam_id: camId, nombre: c.nombre, emoji: c.emoji,
+    dedicatoria: ded || undefined,
+    snapshot: { esencia: c.esencia ?? '', arco: c.arco ?? null,
+      misiones: (c.misiones || []).map(m => ({ id: m.id, nombre: m.nombre, forma: m.forma, estado: m.estado, completions: [...(m.completions || [])] })),
+      milestones: (c.milestones || []).map(ms => ({ id: ms.id, nombre: ms.nombre, regalo: ms.regalo ?? '', estado: ms.estado })) } });
+  s.camisetas = s.camisetas.filter(x => x.id !== camId);
+  return true;
+}
+
+// Despedirse de un cerro entero. Mismo peso que despedirse de una: un último
+// vistazo a lo que hay dentro y un gesto sostenido. Lo que no lleva es la
+// opción de mandárselo a alguien —un cerro no se le manda a nadie, se suelta.
+function DespedidaCerro({ cerro, dentro, onDonar, onCancel }) {
+  return (<div className="fade-up" style={{ border: '1px solid var(--accent)', borderRadius: 2, padding: 16 }}>
+    <div className="flex items-baseline justify-between mb-3">
+      <span className="smallcaps" style={{ color: 'var(--accent)' }}>Soltar el cerro</span>
+      <button onClick={onCancel} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Cancelar"><X size={16} /></button>
+    </div>
+    <p className="ff-serif italic mb-4" style={{ color: 'var(--ink-soft)' }}>
+      Un último vistazo a «{cerro.nombre}». Estas {dentro.length === 1 ? 'es la camiseta' : `son las ${dentro.length} camisetas`} que estás soltando:
+    </p>
+    <div className="grid gap-1 mb-5" style={{ maxHeight: '40vh', overflowY: 'auto' }}>
+      {dentro.map(c => (
+        <div key={c.id} className="flex items-baseline gap-2 ff-serif">
+          <span>{c.emoji}</span><span className="flex-1">{c.nombre}</span>
+          {c.esencia && <span className="ff-mono text-xs truncate" style={{ color: 'var(--ink-faint)', maxWidth: '45%' }}>{c.esencia}</span>}
+        </div>
+      ))}
+    </div>
+    <p className="ff-serif text-sm mb-4" style={{ color: 'var(--ink-soft)' }}>
+      Salen de tu clóset y no vuelven. Conservas los puntos que ganaste con ellas y la historia guarda por dónde pasaron.
+    </p>
+    <HoldToRelease label={`soltar ${dentro.length === 1 ? 'la camiseta' : 'las ' + dentro.length}`} onComplete={onDonar} duration={2000} />
+  </div>);
+}
+
 // ── El mueble ────────────────────────────────────────────────────────────
 // El clóset dejó de ser una lista. Tres superficies: lo que llevas puesto,
 // cinco ganchos y los cerros. No son tres formas de ordenar: son tres formas
@@ -1602,11 +1692,10 @@ function useArrastre(onSoltar, onTap) {
   };
 
   const fantasma = drag && drag.movido ? (
-    <div className="fixed pointer-events-none ff-serif flex items-center gap-2 px-3 py-2"
+    <div className="fixed pointer-events-none ff-serif flex items-center gap-2 px-3 py-2 aberracion-caja"
       style={{
         left: drag.x, top: drag.y, transform: 'translate(-50%, -50%) rotate(-2deg)',
-        zIndex: 200, background: 'var(--bg-card)', border: '1px solid var(--ink)',
-        borderRadius: 2, boxShadow: '0 6px 18px rgba(28,24,19,0.22)', opacity: 0.95,
+        zIndex: 200, background: 'var(--bg-card)', border: '1px solid var(--cian)', borderRadius: 2,
       }}>
       <span className="text-xl">{drag.cam.emoji}</span>
       <span className="text-base">{drag.cam.nombre}</span>
@@ -1631,8 +1720,8 @@ function Agarradero({ onPointerDown, label }) {
 function MoverSheet({ cam, cerros, cams, onMover, onClose }) {
   const ocupante = (i) => cams.find(c => c.id !== cam.id && enGancho(c, i));
   const ir = (u) => { onMover(cam.id, u); onClose(); };
-  return (<div className="fixed inset-0 flex items-end justify-center" style={{ zIndex: 150, background: 'rgba(28,24,19,0.35)' }} onClick={onClose}>
-    <div className="w-full max-w-xl p-5 fade-up" style={{ background: 'var(--bg)', borderTop: '1px solid var(--line)', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+  return (<div className="fixed inset-0 flex items-end justify-center" style={{ zIndex: 150, background: 'rgba(4,2,10,0.72)' }} onClick={onClose}>
+    <div className="w-full max-w-xl p-5 fade-up" style={{ background: 'var(--bg)', borderTop: '1px solid var(--cian)', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
       <div className="flex items-baseline justify-between mb-4">
         <span className="ff-serif text-lg">{cam.emoji} {cam.nombre}</span>
         <button onClick={onClose} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Cerrar"><X size={16} /></button>
@@ -1669,16 +1758,16 @@ function MoverSheet({ cam, cerros, cams, onMover, onClose }) {
   </div>);
 }
 
-function FilaCamiseta({ cam, agarrar, onOpen, atenuada, compacta }) {
+function FilaCamiseta({ cam, agarrar, onOpen, atenuada }) {
   return (<div className="flex items-stretch" style={{
     background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2,
     opacity: atenuada ? 0.35 : 1,
   }}>
     <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
-    <button onClick={() => onOpen(cam.id)} className={`text-left ring-ink flex-1 ${compacta ? 'py-2 pr-3' : 'p-4'}`}>
+    <button onClick={() => onOpen(cam.id)} className="text-left ring-ink flex-1 py-2 pr-3">
       <div className="flex items-center gap-3">
-        <span className={compacta ? 'text-xl' : 'text-2xl'}>{cam.emoji}</span>
-        <span className={`ff-serif flex-1 ${compacta ? 'text-base' : 'text-lg'}`}>{cam.nombre}</span>
+        <span className="text-xl">{cam.emoji}</span>
+        <span className="ff-serif text-base flex-1">{cam.nombre}</span>
         <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
       </div>
     </button>
@@ -1686,12 +1775,15 @@ function FilaCamiseta({ cam, agarrar, onOpen, atenuada, compacta }) {
 }
 
 function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCatalogo, onImport,
-                        onReorder, onMover, onLavar, onCrearCerro, onRenombrarCerro, onBorrarCerro }) {
-  const [abiertos, setAbiertos] = useState(() => new Set());
+                        onReorder, onMover, onLavar, onCrearCerro, onRenombrarCerro, onBorrarCerro, onDonarCerro }) {
+  // Los cerros arrancan abiertos: un cerro sirve para saber qué hay dentro.
+  // Se cierran cuando estorban, no al revés.
+  const [cerrados, setCerrados] = useState(() => new Set());
   const [creandoCerro, setCreandoCerro] = useState(false);
   const [nombreCerro, setNombreCerro] = useState('');
   const [renombrando, setRenombrando] = useState(null);
   const [borrando, setBorrando] = useState(null);
+  const [donando, setDonando] = useState(null);
   const [moviendo, setMoviendo] = useState(null);
 
   const { agarrar, fantasma, zona, arrastrando } = useArrastre(
@@ -1706,12 +1798,11 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
 
   const puestas = cams.filter(estaPuesta);
   const ordenados = [...cerros].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
-  const toggleCerro = (id) => setAbiertos(prev => {
+  const toggleCerro = (id) => setCerrados(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
-  // Estilo de una zona cuando el dedo está encima: el sitio se enciende.
   const marco = (clave) => zona === clave
-    ? { borderColor: 'var(--ink)', background: 'var(--bg-card)' }
+    ? { borderColor: 'var(--cian)', boxShadow: '0 0 0 1px var(--magenta), 0 0 18px -4px var(--cian)' }
     : { borderColor: 'var(--line-soft)' };
 
   const camMoviendo = moviendo ? cams.find(c => c.id === moviendo) : null;
@@ -1730,110 +1821,15 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
       </div>
     </div>
 
-    {/* ── Ganchos ── cinco, fijos. Un gancho libre es información, así que
-        se dibuja vacío en vez de desaparecer. */}
-    <div className="smallcaps mb-3" style={{ color: 'var(--ink-faint)' }}>Ganchos</div>
-    <div className="grid gap-2 mb-10">
-      {Array.from({ length: GANCHOS }, (_, i) => {
-        const cam = cams.find(c => enGancho(c, i));
-        return (<div key={i} data-drop={`gancho:${i}`}
-          style={{ border: cam ? '1px solid' : '1px dashed', borderRadius: 2, ...marco(`gancho:${i}`) }}>
-          {cam ? (
-            <div className="flex items-stretch" style={{ opacity: arrastrando === cam.id ? 0.35 : 1 }}>
-              <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
-              <button onClick={() => onOpen(cam.id)} className="text-left ring-ink flex-1 py-3 pr-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{cam.emoji}</span>
-                  <span className="ff-serif text-lg flex-1">{cam.nombre}</span>
-                  <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
-                </div>
-              </button>
-            </div>
-          ) : (
-            <div className="py-4 px-4 ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>gancho libre</div>
-          )}
-        </div>);
-      })}
-    </div>
-
-    {/* ── Cerros ── montones con nombre. Por dentro no se ordenan. */}
+    {/* ── Puestas ── van arriba: son las importantes. Sin límite, a propósito;
+        la salida no es un tope, es lavar la ropa. */}
     <div className="flex items-baseline justify-between mb-3">
-      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Cerros</span>
-      {!creandoCerro && (
-        <button onClick={() => { setCreandoCerro(true); setNombreCerro(''); }}
-          className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>
-          nuevo cerro
-        </button>
-      )}
-    </div>
-    {creandoCerro && (
-      <div className="flex gap-2 mb-3 fade-up">
-        <input value={nombreCerro} onChange={e => setNombreCerro(e.target.value)} autoFocus
-          placeholder="nombre del cerro"
-          onKeyDown={e => { if (e.key === 'Enter' && nombreCerro.trim()) { onCrearCerro(nombreCerro); setCreandoCerro(false); } if (e.key === 'Escape') setCreandoCerro(false); }}
-          className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
-        <button onClick={() => { if (nombreCerro.trim()) onCrearCerro(nombreCerro); setCreandoCerro(false); }}
-          className="ring-ink ff-mono text-xs px-3" style={{ border: '1px solid var(--ink)' }}>crear</button>
-        <button onClick={() => setCreandoCerro(false)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={16} /></button>
-      </div>
-    )}
-    <div className="grid gap-2 mb-10">
-      {ordenados.map(k => {
-        const dentro = cams.filter(c => enCerro(c, k.id));
-        const abierto = abiertos.has(k.id);
-        return (<div key={k.id} data-drop={`cerro:${k.id}`}
-          style={{ border: '1px solid', borderRadius: 2, background: 'var(--bg-card)', ...marco(`cerro:${k.id}`) }}>
-          {renombrando === k.id ? (
-            <div className="flex gap-2 p-3">
-              <input defaultValue={k.nombre} autoFocus
-                onKeyDown={e => { if (e.key === 'Enter') { onRenombrarCerro(k.id, e.target.value); setRenombrando(null); } if (e.key === 'Escape') setRenombrando(null); }}
-                onBlur={e => { onRenombrarCerro(k.id, e.target.value); setRenombrando(null); }}
-                className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
-            </div>
-          ) : (
-            <div className="flex items-center">
-              <button onClick={() => toggleCerro(k.id)} className="text-left ring-ink flex-1 py-3 px-4">
-                <div className="flex items-baseline gap-2">
-                  <span className="ff-serif text-lg flex-1">{k.nombre}</span>
-                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{dentro.length}</span>
-                  {abierto ? <ChevronUp size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
-                           : <ChevronDown size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />}
-                </div>
-              </button>
-              {!k.esDelSistema && (borrando === k.id ? (
-                <div className="flex items-center gap-2 pr-3 fade-up">
-                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>¿borrar?</span>
-                  <button onClick={() => { onBorrarCerro(k.id); setBorrando(null); }} className="ring-ink ff-mono text-xs px-2 py-0.5" style={{ color: 'var(--accent)', border: '1px solid var(--accent-soft)' }}>sí</button>
-                  <button onClick={() => setBorrando(null)} className="ring-ink ff-mono text-xs px-2 py-0.5" style={{ color: 'var(--ink-faint)' }}>no</button>
-                </div>
-              ) : (
-                <div className="flex items-center pr-2">
-                  <button onClick={() => setRenombrando(k.id)} className="ring-ink p-2" style={{ color: 'var(--ink-faint)' }} aria-label={`Renombrar ${k.nombre}`}><Edit2 size={14} strokeWidth={1.5} /></button>
-                  <button onClick={() => setBorrando(k.id)} className="ring-ink p-2" style={{ color: 'var(--ink-faint)' }} aria-label={`Borrar ${k.nombre}`}><Trash2 size={14} strokeWidth={1.5} /></button>
-                </div>
-              ))}
-            </div>
-          )}
-          {abierto && (
-            <div className="grid gap-1 px-3 pb-3">
-              {dentro.length === 0
-                ? <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Vacío.</p>
-                : dentro.map(cam => <FilaCamiseta key={cam.id} cam={cam} agarrar={agarrar}
-                    onOpen={onOpen} atenuada={arrastrando === cam.id} compacta />)}
-            </div>
-          )}
-        </div>);
-      })}
-    </div>
-
-    {/* ── Puestas ── sin límite, a propósito. La salida es lavar la ropa. */}
-    <div className="flex items-baseline justify-between mb-3">
-      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Puestas</span>
+      <span className="smallcaps" style={{ color: 'var(--magenta)' }}>Puestas</span>
       <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{puestas.length}</span>
     </div>
-    <div data-drop="puesta" className="grid gap-3 pb-2"
+    <div data-drop="puesta" className="grid gap-3"
       style={{ border: '1px solid', borderRadius: 2, padding: puestas.length ? 0 : 16,
-               ...(zona === 'puesta' ? { borderColor: 'var(--ink)' } : { borderColor: 'transparent' }) }}>
+               ...(zona === 'puesta' ? { borderColor: 'var(--cian)', boxShadow: '0 0 18px -4px var(--cian)' } : { borderColor: 'transparent' }) }}>
       {puestas.length === 0 && (
         <p className="ff-serif italic" style={{ color: 'var(--ink-faint)' }}>
           No llevas nada puesto. Baja algo de un gancho o de un cerro.
@@ -1885,11 +1881,129 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
         Sin confirmación y sin deshacer: no destruye nada, y preguntarle
         "¿estás seguro?" a alguien agobiado es insufrible. */}
     {puestas.length > 0 && (
-      <button onClick={onLavar} className="w-full ring-ink ff-serif text-lg py-4 mt-6"
-        style={{ border: '1px solid var(--ink)', color: 'var(--ink)' }}>
-        lavar la ropa
+      <button onClick={onLavar} className="w-full ring-ink ff-mono text-sm py-4 mt-4 mb-12 boton-neon"
+        style={{ letterSpacing: '0.18em' }}>
+        LAVAR LA ROPA
       </button>
     )}
+
+    {/* ── Ganchos ── cinco, fijos. Un gancho libre es información, así que
+        se dibuja vacío en vez de desaparecer. */}
+    <div className="smallcaps mb-3" style={{ color: 'var(--cian)' }}>Ganchos</div>
+    <div className="grid gap-2 mb-12">
+      {Array.from({ length: GANCHOS }, (_, i) => {
+        const cam = cams.find(c => enGancho(c, i));
+        return (<div key={i} data-drop={`gancho:${i}`}
+          style={{ border: cam ? '1px solid' : '1px dashed', borderRadius: 2,
+                   background: cam ? 'var(--bg-card)' : 'transparent', ...marco(`gancho:${i}`) }}>
+          {cam ? (
+            <div className="flex items-stretch" style={{ opacity: arrastrando === cam.id ? 0.35 : 1 }}>
+              <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
+              <button onClick={() => onOpen(cam.id)} className="text-left ring-ink flex-1 py-3 pr-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{cam.emoji}</span>
+                  <span className="ff-serif text-lg flex-1">{cam.nombre}</span>
+                  <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
+                </div>
+              </button>
+            </div>
+          ) : (
+            <div className="py-4 px-4 ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>gancho libre</div>
+          )}
+        </div>);
+      })}
+    </div>
+
+    {/* ── Cerros ── montones con nombre. Por dentro no se ordenan. */}
+    <div className="flex items-baseline justify-between mb-3">
+      <span className="smallcaps" style={{ color: 'var(--violeta-luz)' }}>Cerros</span>
+      {!creandoCerro && (
+        <button onClick={() => { setCreandoCerro(true); setNombreCerro(''); }}
+          className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>
+          nuevo cerro
+        </button>
+      )}
+    </div>
+    {creandoCerro && (
+      <div className="flex gap-2 mb-3 fade-up">
+        <input value={nombreCerro} onChange={e => setNombreCerro(e.target.value)} autoFocus
+          placeholder="nombre del cerro"
+          onKeyDown={e => { if (e.key === 'Enter' && nombreCerro.trim()) { onCrearCerro(nombreCerro); setCreandoCerro(false); } if (e.key === 'Escape') setCreandoCerro(false); }}
+          className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+        <button onClick={() => { if (nombreCerro.trim()) onCrearCerro(nombreCerro); setCreandoCerro(false); }}
+          className="ring-ink ff-mono text-xs px-3" style={{ border: '1px solid var(--cian)', color: 'var(--cian)' }}>crear</button>
+        <button onClick={() => setCreandoCerro(false)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={16} /></button>
+      </div>
+    )}
+    <div className="grid gap-2 pb-8">
+      {ordenados.map(k => {
+        const dentro = cams.filter(c => enCerro(c, k.id));
+        const abierto = !cerrados.has(k.id);
+        return (<div key={k.id} data-drop={`cerro:${k.id}`}
+          style={{ border: '1px solid', borderRadius: 2, background: 'var(--bg-card)', ...marco(`cerro:${k.id}`) }}>
+          {renombrando === k.id ? (
+            <div className="flex gap-2 p-3">
+              <input defaultValue={k.nombre} autoFocus
+                onKeyDown={e => { if (e.key === 'Enter') { onRenombrarCerro(k.id, e.target.value); setRenombrando(null); } if (e.key === 'Escape') setRenombrando(null); }}
+                onBlur={e => { onRenombrarCerro(k.id, e.target.value); setRenombrando(null); }}
+                className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+            </div>
+          ) : (
+            <div className="flex items-center">
+              <button onClick={() => toggleCerro(k.id)} className="text-left ring-ink flex-1 py-3 px-4">
+                <div className="flex items-baseline gap-2">
+                  <span className="ff-serif text-lg">{k.nombre}</span>
+                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{dentro.length}</span>
+                  {/* Cerrado, la tira de emojis dice qué hay sin abrirlo. */}
+                  {!abierto && <span className="flex-1 truncate text-sm">{dentro.map(c => c.emoji).join(' ')}</span>}
+                  {abierto ? <ChevronUp size={16} strokeWidth={1.4} className="ml-auto" style={{ color: 'var(--ink-faint)' }} />
+                           : <ChevronDown size={16} strokeWidth={1.4} className="ml-auto" style={{ color: 'var(--ink-faint)' }} />}
+                </div>
+              </button>
+              {!k.esDelSistema && (borrando === k.id ? (
+                <div className="flex items-center gap-2 pr-3 fade-up">
+                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>¿borrar?</span>
+                  <button onClick={() => { onBorrarCerro(k.id); setBorrando(null); }} className="ring-ink ff-mono text-xs px-2 py-0.5" style={{ color: 'var(--accent)', border: '1px solid var(--accent)' }}>sí</button>
+                  <button onClick={() => setBorrando(null)} className="ring-ink ff-mono text-xs px-2 py-0.5" style={{ color: 'var(--ink-faint)' }}>no</button>
+                </div>
+              ) : (
+                <div className="flex items-center pr-2">
+                  <button onClick={() => setRenombrando(k.id)} className="ring-ink p-2" style={{ color: 'var(--ink-faint)' }} aria-label={`Renombrar ${k.nombre}`}><Edit2 size={14} strokeWidth={1.5} /></button>
+                  <button onClick={() => setBorrando(k.id)} className="ring-ink p-2" style={{ color: 'var(--ink-faint)' }} aria-label={`Borrar ${k.nombre}`}><Trash2 size={14} strokeWidth={1.5} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          {abierto && (
+            <div className="px-3 pb-3">
+              {dentro.length === 0
+                ? <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Vacío.</p>
+                : (<>
+                    <div className="grid gap-1">
+                      {dentro.map(cam => <FilaCamiseta key={cam.id} cam={cam} agarrar={agarrar}
+                        onOpen={onOpen} atenuada={arrastrando === cam.id} />)}
+                    </div>
+                    {/* Donar el cerro entero. El cerro ya es la selección: no
+                        hace falta escoger camiseta por camiseta. */}
+                    {donando === k.id ? (
+                      <div className="mt-3">
+                        <DespedidaCerro cerro={k} dentro={dentro}
+                          onDonar={() => { onDonarCerro(k.id); setDonando(null); }}
+                          onCancel={() => setDonando(null)} />
+                      </div>
+                    ) : (
+                      <button onClick={() => setDonando(k.id)}
+                        className="ring-ink ff-mono text-xs mt-3 py-1 px-2"
+                        style={{ color: 'var(--ink-faint)', border: '1px solid var(--line-soft)' }}>
+                        donar el cerro
+                      </button>
+                    )}
+                  </>)}
+            </div>
+          )}
+        </div>);
+      })}
+    </div>
   </div>);
 }
 
@@ -2767,9 +2881,9 @@ function MisionForm({ initial, onSave, onCancel }) {
     <div className="flex flex-wrap gap-1 mb-3">
       {TONOS.map(t => (
         <button key={t.id} onClick={() => toggleTono(t.id)} className="ff-mono text-xs px-2 py-1 ring-ink" style={{
-          background: tonos.includes(t.id) ? 'var(--accent)' : 'transparent',
-          color: tonos.includes(t.id) ? 'var(--bg)' : 'var(--ink-soft)',
-          border: '1px solid ' + (tonos.includes(t.id) ? 'var(--accent)' : 'var(--line)'),
+          background: tonos.includes(t.id) ? t.color : 'transparent',
+          color: tonos.includes(t.id) ? 'var(--void)' : 'var(--ink-soft)',
+          border: '1px solid ' + (tonos.includes(t.id) ? t.color : 'var(--line)'),
         }}>{t.label}</button>
       ))}
     </div>
@@ -2972,11 +3086,11 @@ function Heatmap({ state }) {
           const esTibia = d.diasDesde !== null && d.diasDesde >= 7 && d.diasDesde < 14;
           const esFria = d.diasDesde !== null && d.diasDesde >= 14;
           const nunca = d.diasDesde === null;
-          const nombreColor = (esFria || nunca) ? '#8A7E70' : '#5C5147';
+          const nombreColor = (esFria || nunca) ? '#7B7490' : '#B9AE99';
           const dotColor = esFria || nunca ? '#8B2D1C' : esTibia ? '#C77A3A' : null;
           return (<g key={d.cam.id}>
-            <text x="0" y={y + rowHeight * 0.7} fontSize="13" fontFamily="Fraunces, Georgia, serif">
-              <tspan fill="#1C1813">{d.cam.emoji}</tspan>
+            <text x="0" y={y + rowHeight * 0.7} fontSize="13" fontFamily="Chakra Petch, system-ui, sans-serif">
+              <tspan fill="#F0E5D0">{d.cam.emoji}</tspan>
               <tspan dx="6" fill={nombreColor}>{d.cam.nombre}</tspan>
             </text>
             {dotColor && <circle cx={labelWidth - 8} cy={y + rowHeight * 0.5} r="2.5" fill={dotColor} />}
@@ -2987,7 +3101,7 @@ function Heatmap({ state }) {
                 fill={cellColor(p)} rx="1" />
             ))}
             {d.totalPeriodo > 0 && (
-              <text x={totalColX} y={y + rowHeight * 0.7} fontSize="10" fill="#8A7E70" fontFamily="JetBrains Mono, monospace">
+              <text x={totalColX} y={y + rowHeight * 0.7} fontSize="10" fill="#7B7490" fontFamily="Space Mono, monospace">
                 {round1(d.totalPeriodo)}
               </text>
             )}
@@ -3000,8 +3114,8 @@ function Heatmap({ state }) {
             x={labelWidth + i * (cellWidth + cellGap) + cellWidth / 2}
             y={data.length * (rowHeight + 4) + 12}
             fontSize="10" textAnchor="middle"
-            fill={isToday ? '#1C1813' : '#8A7E70'}
-            fontFamily="JetBrains Mono, monospace"
+            fill={isToday ? '#F0E5D0' : '#7B7490'}
+            fontFamily="Space Mono, monospace"
             fontWeight={isToday ? '500' : '400'}>{dowChars[d.getDay()]}</text>);
         })}
         {rango === 30 && dias.map((d, i) => {
@@ -3009,8 +3123,8 @@ function Heatmap({ state }) {
           return (<text key={i}
             x={labelWidth + i * (cellWidth + cellGap) + cellWidth / 2}
             y={data.length * (rowHeight + 4) + 12}
-            fontSize="9" textAnchor="middle" fill="#8A7E70"
-            fontFamily="JetBrains Mono, monospace">{d.getDate()}</text>);
+            fontSize="9" textAnchor="middle" fill="#7B7490"
+            fontFamily="Space Mono, monospace">{d.getDate()}</text>);
         })}
       </svg>
     </div>
