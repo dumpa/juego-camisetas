@@ -1,7 +1,7 @@
 // Service worker mínimo para el Juego de las Camisetas
 // Estrategia: network-first para HTML, cache-first para assets con hash.
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `juego-camisetas-${CACHE_VERSION}`;
 
 self.addEventListener('install', (event) => {
