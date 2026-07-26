@@ -1,6 +1,6 @@
 {
   "name": "El juego de las camisetas",
-  "short_name": "El juego",
+  "short_name": "Camisetas",
   "description": "Un juego de identidades y misiones.",
   "start_url": "/",
   "scope": "/",
