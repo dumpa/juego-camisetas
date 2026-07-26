@@ -1,23 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#F2EBDD"/>
-  <filter id="grain">
-    <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2"/>
-    <feColorMatrix values="0 0 0 0 0.11, 0 0 0 0 0.09, 0 0 0 0 0.07, 0 0 0 0.08 0"/>
-  </filter>
-  <rect width="512" height="512" filter="url(#grain)" opacity="0.4"/>
-  <!-- Tres rombos diagonales, los tres tonos -->
-  <g transform="translate(256 256)">
-    <!-- Tinta -->
-    <g transform="translate(-90 -55) rotate(45)">
-      <rect x="-50" y="-50" width="100" height="100" fill="#1C1813"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Icono del Juego de las Camisetas.
+       Misma composición de siempre —tres rombos— en la línea del app:
+       fondo #0a0a0a (el trazo del codec), los tonos como color, y la
+       aberración cromática que el codec le hace a la silueta. -->
+  <defs>
+    <radialGradient id="halo" cx="50%" cy="-6%" r="62%">
+      <stop offset="0%" stop-color="#8900FD" stop-opacity="0.20"/>
+      <stop offset="55%" stop-color="#8900FD" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#8900FD" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="halo2" cx="50%" cy="104%" r="55%">
+      <stop offset="0%" stop-color="#0DEDF7" stop-opacity="0.09"/>
+      <stop offset="100%" stop-color="#0DEDF7" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="barrido" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="1.4" fill="#F0E5D0" opacity="0.055"/>
+    </pattern>
+    <g id="rombos">
+      <g transform="translate(-90 -55) rotate(45)"><rect x="-50" y="-50" width="100" height="100"/></g>
+      <g transform="rotate(45)"><rect x="-65" y="-65" width="130" height="130"/></g>
+      <g transform="translate(90 55) rotate(45)"><rect x="-45" y="-45" width="90" height="90"/></g>
     </g>
-    <!-- Granate -->
-    <g transform="translate(0 0) rotate(45)">
-      <rect x="-65" y="-65" width="130" height="130" fill="#8B2D1C"/>
-    </g>
-    <!-- Dorado -->
-    <g transform="translate(90 55) rotate(45)">
-      <rect x="-45" y="-45" width="90" height="90" fill="#A07E2B"/>
-    </g>
+  </defs>
+
+  <rect width="512" height="512" fill="#0a0a0a"/>
+  <rect width="512" height="512" fill="url(#halo)"/>
+  <rect width="512" height="512" fill="url(#halo2)"/>
+
+  <g transform="translate(256 256) scale(1.10)">
+    <!-- Las dos copias desplazadas: cian a un lado, magenta al otro.
+         Es la misma operación que el codec aplica a la camiseta. -->
+    <use href="#rombos" x="-7" y="-2" fill="#0DEDF7" opacity="0.55"/>
+    <use href="#rombos" x="7" y="3" fill="#DA1895" opacity="0.55"/>
+    <!-- Los tres tonos, en su sitio de siempre -->
+    <g transform="translate(-90 -55) rotate(45)"><rect x="-50" y="-50" width="100" height="100" fill="#0DEDF7"/></g>
+    <g transform="rotate(45)"><rect x="-65" y="-65" width="130" height="130" fill="#DA1895"/></g>
+    <g transform="translate(90 55) rotate(45)"><rect x="-45" y="-45" width="90" height="90" fill="#F4FF01"/></g>
   </g>
+
+  <rect width="512" height="512" fill="url(#barrido)"/>
 </svg>
