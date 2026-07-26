@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Check, X, GripVertical, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home } from 'lucide-react';
 import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encodeCamisetaToJSON, decodeJSONToCamiseta } from './codec/index.js';
+import { elegirEco, silenciarEco, citaVigente } from './ecos/index.js';
+import { TEXTOS } from './ecos/textos.js';
+import { construirICS, entregarCita, proximaCita, DURACION, aInputLocal, deInputLocal } from './cita.js';
 
 const STATE_KEY = 'juego-camisetas:state:v1';
 const INSTALL_KEY = 'juego-camisetas:install-ack:v1';
@@ -37,9 +40,9 @@ function isStandalone() {
 }
 
 const emptyState = () => ({
-  user_id: 'local', version: 8, created_at: new Date().toISOString(),
+  user_id: 'local', version: 9, created_at: new Date().toISOString(),
   camisetas: [], sesiones: [], eventos: [], movimientos: [], visitas: [],
-  cerros: [cerroSistema()],
+  cerros: [cerroSistema()], ecos: { silencios: {} },
 });
 
 async function loadState() {
@@ -246,7 +249,16 @@ function migrate(s) {
       if (!valida) cam.ubicacion = cam.archived_at ? AL_SIN_DOBLAR() : PUESTA();
     });
   }
-  s.version = 8;
+  // v9 — el eco necesita recordar qué ya dijo:
+  //   · s.ecos.silencios[clave] = ts del descarte. Nada más.
+  // No lleva respaldo pre-v9 como v7 y v8 porque no reescribe un solo dato
+  // existente: crea una llave vacía. Un respaldo aquí sería una tercera
+  // copia del estado completo en localStorage a cambio de nada.
+  // Las citas NO viven en una tabla propia: se escriben como evento
+  // 'cita_agendada' en la historia, que es donde va lo que el jefe decide.
+  if (!s.ecos || typeof s.ecos !== 'object') s.ecos = {};
+  if (!s.ecos.silencios || typeof s.ecos.silencios !== 'object') s.ecos.silencios = {};
+  s.version = 9;
   return s;
 }
 
@@ -484,6 +496,9 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [sesion, setSesion] = useState(null);
   const [showNota, setShowNota] = useState(false);  // hoja de nota rápida (global)
+  // Hoja de cita: { cadencia, origen: 'cierre' | 'eco', eco? }. La abre el
+  // final de un check-in o el eco; es la misma hoja en los dos casos.
+  const [pedirCita, setPedirCita] = useState(null);
 
   // Instructivo de instalación: se muestra de primeras si NO está instalada
   // y el usuario no lo ha cerrado antes. Una vez abierta desde el ícono
@@ -877,6 +892,14 @@ export default function App() {
     update(s => { pushEv(s, { tipo: 'nota', texto: t }); });
   };
 
+  // La cita queda en la historia como lo que es: una decisión del jefe. Se
+  // guarda para qué fecha y con qué nombre; nunca si se cumplió, porque un
+  // .ics no vuelve y porque faltar no produce nada.
+  const agendarCita = ({ cadencia, para, titulo }) => update(s => {
+    pushEv(s, { tipo: 'cita_agendada', cadencia, para, titulo });
+  });
+  const descartarEco = (eco) => update(s => silenciarEco(s, eco));
+
   if (!state) return <Loading />;
   const camsActivas = state.camisetas.filter(estaPuesta);
   const puntosUser = puntosTotales(state.movimientos);
@@ -962,24 +985,59 @@ export default function App() {
   }
   if (sesion === 'diaria') return <Frame><SesionDiaria cams={camsActivas} onToggle={toggleMision} onArchive={archiveMision}
     onClose={(n) => { if (n) logSesion({ tipo: 'diaria', notas: n }); setSesion(null); }} /></Frame>;
+  // Cerrar un check-in largo o mensual desemboca en la cita del siguiente.
+  // Salirse por la X no: abandonar no es cerrar, y hasta ahora la X dejaba
+  // una sesión registrada con notas vacías —lo que además le habría tapado
+  // la boca al eco por una semana sin que nadie cerrara nada.
+  const cerrarSesion = (tipo) => (p) => {
+    setSesion(null);
+    if (!p) return;
+    const { completa, ...datos } = p;
+    logSesion({ tipo, ...datos });
+    if (completa) setPedirCita({ cadencia: tipo, origen: 'cierre' });
+  };
   if (sesion === 'semanal') return <Frame><SesionSemanal cams={camsActivas}
     onArchiveMision={archiveMision} onEditMision={editMision} onAddMision={addMision}
     onAjustarDificultad={ajustarDif} onCambiarForma={cambiarForma}
-    onClose={(p) => { logSesion({ tipo: 'semanal', ...p }); setSesion(null); }} /></Frame>;
+    onClose={cerrarSesion('semanal')} /></Frame>;
   if (sesion === 'mensual') return <Frame><SesionMensual cams={state.camisetas}
     onArchiveCam={archiveCamiseta} onReviveCam={reviveCamiseta} onDonateCam={donarCamiseta}
     onCreateCam={() => { setSesion(null); setShowCreate(true); }}
-    onClose={(p) => { logSesion({ tipo: 'mensual', ...p }); setSesion(null); }} /></Frame>;
+    onClose={cerrarSesion('mensual')} /></Frame>;
+
+  // El eco se calcula una vez por estado y se muestra donde el usuario
+  // realmente entra: la pantalla del hacedor. En el Diario no serviría de
+  // nada — quien ya llegó al Diario no necesita que lo llamen.
+  const eco = tab === 'hoy' ? elegirEco(state) : null;
 
   return (<Frame><Header puntos={puntosUser} warn={state._saveError} />
     <main className="px-5 pb-32 pt-2 max-w-2xl mx-auto">
+      {eco && <EcoBanner eco={eco}
+        onAccion={() => { setPedirCita({ cadencia: eco.accion.cadencia, origen: 'eco', eco }); }}
+        onDescartar={() => descartarEco(eco)} />}
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
       {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} />}
-      {tab === 'diario' && <DiarioView state={state} onStart={setSesion} />}
+      {tab === 'diario' && <DiarioView state={state} onStart={setSesion}
+        onAgendar={(cadencia) => setPedirCita({ cadencia, origen: 'diario' })} />}
     </main>
     <QuickNoteButton onClick={() => setShowNota(true)} />
     <TabBar tab={tab} setTab={setTab} />
     {showNota && <QuickNoteSheet onClose={() => setShowNota(false)} onSave={(t) => { tomarNota(t); setShowNota(false); }} />}
+    {pedirCita && <CitaSheet
+      cadencia={pedirCita.cadencia}
+      origen={pedirCita.origen}
+      onAgendar={(datos) => {
+        agendarCita({ cadencia: pedirCita.cadencia, ...datos });
+        if (pedirCita.eco) descartarEco(pedirCita.eco);
+        setPedirCita(null);
+      }}
+      onClose={() => {
+        // Cerrar la hoja también es una respuesta: el eco ya dijo lo suyo y
+        // se calla hasta la próxima ocasión. Preguntar mañana lo mismo es
+        // lo que convierte un recordatorio en una plaga.
+        if (pedirCita.eco) descartarEco(pedirCita.eco);
+        setPedirCita(null);
+      }} />}
   </Frame>);
 }
 
@@ -1024,6 +1082,135 @@ function QuickNoteSheet({ onClose, onSave }) {
             style={{ background: 'var(--ink)', color: 'var(--bg)', opacity: texto.trim() ? 1 : 0.5 }}>
             Guardar nota
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── El eco ───────────────────────────────────────────────────────────────
+//
+// La voz del jefe, arriba de la casa del hacedor. Uno a la vez, sin
+// contadores, sin números rojos, sin insistir. Se cierra y se va.
+//
+// A propósito no lleva encabezado que diga de quién es la voz: el
+// vocabulario todavía no está decidido y una palabra puesta hoy en la UI
+// pesa más que la misma palabra puesta en un documento. Si mañana se decide,
+// va en textos.js y no aquí.
+function EcoBanner({ eco, onAccion, onDescartar }) {
+  return (
+    <div className="mb-7 p-4 fade-up" style={{
+      background: 'var(--bg-card)',
+      border: '1px solid var(--line-soft)',
+      borderLeft: `2px solid ${eco.tono}`,
+    }}>
+      <div className="flex items-start gap-3">
+        <span className="ff-mono text-xs mt-1" style={{ color: eco.tono }}>❯</span>
+        <div className="flex-1">
+          <p className="ff-serif text-lg leading-snug mb-1" style={{ color: 'var(--ink)' }}>{eco.titulo}</p>
+          <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-soft)' }}>{eco.cuerpo}</p>
+          <div className="flex items-center gap-3 mt-4">
+            <button onClick={onAccion} className="ring-ink boton-neon ff-mono text-xs py-1.5 px-3">
+              {eco.accion.etiqueta}
+            </button>
+            <button onClick={onDescartar} className="ring-ink ff-mono text-xs py-1.5 px-1"
+              style={{ color: 'var(--ink-faint)' }}>{eco.descartar}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── La hoja de la cita ───────────────────────────────────────────────────
+//
+// La misma hoja para los tres caminos: al cerrar un check-in, desde el eco y
+// desde el Diario. Escoge cuándo, escribe cómo se va a llamar, y sale al
+// calendario del teléfono. Ahí se acaba: el app no vuelve a saber de ella.
+function CitaSheet({ cadencia, origen, onAgendar, onClose }) {
+  const porDefecto = TEXTOS.cita.nombrePorDefecto[cadencia] || 'Check-in';
+  const [cuando, setCuando] = useState(() => aInputLocal(proximaCita(cadencia)));
+  const [nombre, setNombre] = useState(porDefecto);
+  const [estado, setEstado] = useState('');   // '' | 'enviando' | 'error'
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const fecha = deInputLocal(cuando);
+  const atajo = (dias) => {
+    const d = new Date();
+    d.setDate(d.getDate() + dias);
+    d.setMinutes(Math.round(d.getMinutes() / 15) * 15, 0, 0);
+    setCuando(aInputLocal(d));
+  };
+
+  const poner = async () => {
+    if (!fecha || estado === 'enviando') return;
+    const titulo = nombre.trim() || porDefecto;
+    setEstado('enviando');
+    try {
+      const ics = construirICS({
+        titulo,
+        descripcion: TEXTOS.cita.descripcion[cadencia] || '',
+        inicio: fecha,
+        minutos: DURACION[cadencia] ?? 15,
+      });
+      const r = await entregarCita(ics, `cita-${cadencia}.ics`);
+      if (r === 'cancelada') { setEstado(''); return; }
+      onAgendar({ para: fecha.toISOString(), titulo });
+    } catch (e) {
+      console.error('cita:', e);
+      setEstado('error');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
+      style={{ background: 'rgba(10, 10, 10, 0.72)' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md my-auto max-h-[90vh] overflow-y-auto"
+        style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
+        <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '1px solid var(--line-soft)' }}>
+          <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>{porDefecto}</span>
+          <button onClick={onClose} className="ring-ink p-1" aria-label="Cerrar"><X size={16} style={{ color: 'var(--ink-faint)' }} /></button>
+        </div>
+        <div className="px-5 py-5">
+          <h2 className="display text-2xl mb-1">{TEXTOS.cita.titulo}</h2>
+          <p className="ff-serif italic text-sm mb-6" style={{ color: 'var(--ink-soft)' }}>
+            {origen === 'cierre' ? TEXTOS.cita.entradaCierre : TEXTOS.cita.entradaEco}
+          </p>
+
+          <label className="smallcaps block mb-2" style={{ color: 'var(--ink-faint)' }}>{TEXTOS.cita.etiquetaCuando}</label>
+          <input type="datetime-local" value={cuando} onChange={e => setCuando(e.target.value)}
+            className="w-full ff-mono text-sm p-3 mb-3 ring-ink"
+            style={{ border: '1px solid var(--line)', background: 'var(--bg-card)', colorScheme: 'dark' }} />
+          <div className="flex flex-wrap gap-1.5 mb-6">
+            {TEXTOS.cita.atajos.map(a => (
+              <button key={a.label} onClick={() => atajo(a.dias)}
+                className="ring-ink ff-mono text-xs py-1 px-2"
+                style={{ color: 'var(--ink-soft)', border: '1px solid var(--line)' }}>{a.label}</button>
+            ))}
+          </div>
+
+          <label className="smallcaps block mb-2" style={{ color: 'var(--ink-faint)' }}>{TEXTOS.cita.etiquetaNombre}</label>
+          <input value={nombre} onChange={e => setNombre(e.target.value)} maxLength={80}
+            className="w-full ff-serif text-base pb-2 mb-2 ring-ink"
+            style={{ borderBottom: '1px solid var(--line)' }} />
+          <p className="ff-serif italic text-xs mb-6" style={{ color: 'var(--ink-faint)' }}>{TEXTOS.cita.ayudaNombre}</p>
+
+          <button onClick={poner} disabled={!fecha || estado === 'enviando'}
+            className="w-full ring-ink ff-serif text-base py-3 px-4"
+            style={{ background: 'var(--ink)', color: 'var(--bg)', opacity: fecha && estado !== 'enviando' ? 1 : 0.5 }}>
+            {TEXTOS.cita.accion}
+          </button>
+          {estado === 'error' && (
+            <p className="ff-mono text-xs mt-3" style={{ color: 'var(--accent)' }}>
+              no se pudo entregar al calendario
+            </p>
+          )}
+          <button onClick={onClose} className="w-full ring-ink ff-mono text-xs py-3 mt-1"
+            style={{ color: 'var(--ink-faint)' }}>{TEXTOS.cita.descartar}</button>
         </div>
       </div>
     </div>
@@ -1130,7 +1317,7 @@ function TabBar({ tab, setTab }) {
     { id: 'camisetas', label: 'Camisetas', icon: Hexagon },
     { id: 'diario', label: 'Diario', icon: BookOpen },
   ];
-  return (<nav className="fixed bottom-0 left-0 right-0 px-5 pt-3 pb-6 backdrop-blur-sm" style={{ background: 'rgba(242, 235, 221, 0.85)', borderTop: '1px solid var(--line)' }}>
+  return (<nav className="fixed bottom-0 left-0 right-0 px-5 pt-3 pb-6 backdrop-blur-sm" style={{ background: 'rgba(10, 10, 10, 0.88)', borderTop: '1px solid var(--line)' }}>
     <div className="max-w-2xl mx-auto flex items-center justify-around">
       {tabs.map(({ id, label, icon: Icon }) => (
         <button key={id} onClick={() => setTab(id)} className="flex flex-col items-center gap-1 py-1 px-4 ring-ink rounded">
@@ -2923,7 +3110,7 @@ function AddMilestone({ onSave, onCancel }) {
   return <MilestoneForm onSave={onSave} onCancel={onCancel} submitLabel="añadir" />;
 }
 
-function DiarioView({ state, onStart }) {
+function DiarioView({ state, onStart, onAgendar }) {
   const ult = (tipo) => state.sesiones.filter(s => s.tipo === tipo).slice(-1)[0];
   const fmt = (iso) => iso ? new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '—';
   const cards = [
@@ -2935,17 +3122,37 @@ function DiarioView({ state, onStart }) {
     <p className="ff-serif italic text-lg mb-6" style={{ color: 'var(--ink-soft)' }}>El juego se construye aquí. La reflexión es parte del hacer.</p>
     <Heatmap state={state} />
     <div className="space-y-3 mb-10">
-      {cards.map(c => (
-        <button key={c.tipo} onClick={() => onStart(c.tipo)} className="block w-full text-left p-4 ring-ink" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)' }}>
-          <div className="flex items-baseline justify-between mb-1">
-            <h3 className="ff-serif text-xl">{c.titulo}</h3>
-            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{c.tiempo}</span>
+      {cards.map(c => {
+        // El diario solo agenda lo que se agenda: la semana y el mes. El
+        // cierre del día no tiene cita porque el hacedor vuelve por trabajo,
+        // no por alarma, y un evento diario se vuelve ruido en cuatro días.
+        const agendable = c.tipo !== 'diaria';
+        const cita = agendable ? citaVigente(state, c.tipo) : null;
+        return (
+        <div key={c.tipo} style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)' }}>
+          <button onClick={() => onStart(c.tipo)} className="block w-full text-left p-4 pb-2 ring-ink">
+            <div className="flex items-baseline justify-between mb-1">
+              <h3 className="ff-serif text-xl">{c.titulo}</h3>
+              <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{c.tiempo}</span>
+            </div>
+            <p className="ff-serif italic text-sm mb-1" style={{ color: 'var(--ink-soft)' }}>{c.cita}</p>
+            <p className="ff-serif text-sm" style={{ color: 'var(--ink-soft)' }}>{c.ayuda}</p>
+          </button>
+          <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
+            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>última · {fmt(c.last?.date)}</span>
+            {agendable && (cita ? (
+              <button onClick={() => onAgendar(c.tipo)} className="ring-ink ff-mono text-xs"
+                style={{ color: 'var(--ocean)' }}>
+                {TEXTOS.proxima} · {fmt(cita.para)} {new Date(cita.para).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+              </button>
+            ) : (
+              <button onClick={() => onAgendar(c.tipo)} className="ring-ink boton-neon ff-mono text-xs py-1 px-2">
+                {TEXTOS.ponerHora}
+              </button>
+            ))}
           </div>
-          <p className="ff-serif italic text-sm mb-1" style={{ color: 'var(--ink-soft)' }}>{c.cita}</p>
-          <p className="ff-serif text-sm mb-2" style={{ color: 'var(--ink-soft)' }}>{c.ayuda}</p>
-          <div className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>última · {fmt(c.last?.date)}</div>
-        </button>
-      ))}
+        </div>);
+      })}
     </div>
     <div className="hr-deco mb-6" />
     <h2 className="smallcaps mb-4" style={{ color: 'var(--ink-faint)' }}>la historia</h2>
@@ -3155,7 +3362,7 @@ function Historia({ state }) {
   // Single-select category filter — tap a chip to focus that bucket, tap again
   // (or 'todos') to clear. Default = show everything.
   const CATS = [
-    { id: 'cierres',    label: 'cierres',   match: (e) => e.tipo.startsWith('sesion_') },
+    { id: 'cierres',    label: 'cierres',   match: (e) => e.tipo.startsWith('sesion_') || e.tipo === 'cita_agendada' },
     { id: 'notas',      label: 'notas',     match: (e) => e.tipo === 'nota' },
     { id: 'camisetas',  label: 'camisetas', match: (e) => e.tipo.startsWith('camiseta_') },
     { id: 'misiones',   label: 'misiones',  match: (e) => e.tipo.startsWith('mision_') },
@@ -3294,6 +3501,18 @@ function EventoItem({ e, cam, lookupCam }) {
       glyph = '≈'; color = 'var(--ocean)';
       text = <>lavaste la ropa{Array.isArray(e.nombres) && e.nombres.length > 0 &&
         <span className="ff-serif italic ml-1" style={{ color: 'var(--ink-soft)' }}>· {e.nombres.join(', ')}</span>}</>; break;
+    case 'cita_agendada': {
+      // La fecha para la que se puso, sí: es lo que él decidió. Si se cumplió
+      // o no, no aparece aquí ni en ninguna parte — el app no lo sabe.
+      const cuando = new Date(e.para);
+      const legible = isNaN(cuando.getTime()) ? null
+        : cuando.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }) +
+          ' · ' + cuando.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+      glyph = '◷'; color = 'var(--ocean)';
+      text = <>cita puesta <strong>{e.titulo}</strong>{legible &&
+        <span className="ff-mono text-xs ml-2" style={{ color: 'var(--ink-faint)' }}>{legible}</span>}</>;
+      break;
+    }
     case 'nota':
       glyph = '✎'; color = 'var(--ink-soft)';
       text = <span style={{ color: 'var(--ink-soft)' }} className="italic">{e.texto}</span>; break;
@@ -3448,12 +3667,12 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
         if (m?.nombre?.trim()) onAddMision(camId, { nombre: m.nombre.trim(), forma: m.forma || 'dificil', tonos: m.tonos || [], puntos_base: m.puntos_base });
       });
     });
-    onClose({ notas: notas.trim(), caliente, fria });
+    onClose({ notas: notas.trim(), caliente, fria, completa: true });
   };
   return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
     <div className="flex items-center justify-between mb-2">
       <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Cierre de semana</span>
-      <button onClick={() => onClose({ notas: '' })} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={18} /></button>
+      <button onClick={() => onClose(null)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={18} /></button>
     </div>
     <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{step + 1} / {totalSteps}</div>
     {step < cams.length && (() => {
@@ -3600,6 +3819,7 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onDonateCam, onCreateC
   const [honesto, setHonesto] = useState('');   // A2: pregunta de honestidad, campo propio
   const activas = cams.filter(estaPuesta);
   const finish = () => onClose({
+    completa: true,
     honesto: honesto.trim(),
     notas: [
       sentir.trim() && `Se siente: ${sentir.trim()}`,
@@ -3611,7 +3831,7 @@ function SesionMensual({ cams, onArchiveCam, onReviveCam, onDonateCam, onCreateC
   return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
     <div className="flex items-center justify-between mb-2">
       <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>El observador del observador</span>
-      <button onClick={() => onClose({ notas: '' })} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={18} /></button>
+      <button onClick={() => onClose(null)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={18} /></button>
     </div>
     <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{step + 1} / 5</div>
     {step === 0 && (<div className="fade-up">
