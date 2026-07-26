@@ -1013,7 +1013,16 @@ export default function App() {
   return (<Frame><Header puntos={puntosUser} warn={state._saveError} />
     <main className="px-5 pb-32 pt-2 max-w-2xl mx-auto">
       {eco && <EcoBanner eco={eco}
-        onAccion={() => { setPedirCita({ cadencia: eco.accion.cadencia, origen: 'eco', eco }); }}
+        onAccion={() => {
+          if (eco.accion.tipo === 'cita') {
+            setPedirCita({ cadencia: eco.accion.cadencia, origen: 'eco', eco });
+          } else {
+            // Abrirlo ya es la respuesta del día: si lo dejas a medias, el
+            // eco no vuelve a insistir esta tarde. Mañana es otra clave.
+            descartarEco(eco);
+            setSesion(eco.accion.cadencia);
+          }
+        }}
         onDescartar={() => descartarEco(eco)} />}
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
       {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} />}

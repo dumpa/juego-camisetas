@@ -86,15 +86,60 @@ export function construirICS({ titulo, descripcion = '', inicio, minutos = 15, a
   return lineas.map(plegar).join('\r\n') + '\r\n';
 }
 
-// Devuelve 'entregada' | 'cancelada'. Lanza solo si no hubo forma.
+// ── Entrega ──────────────────────────────────────────────────────────────
 //
-// El share sheet primero y a propósito: en iOS instalado desde el ícono, un
-// <a download> con un blob no abre el calendario —descarga a Archivos o no
-// hace nada—. Compartir el .ics como archivo sí ofrece "Añadir a Calendario".
-// En escritorio no hay share de archivos y ahí sí sirve la descarga.
+// Devuelve 'entregada' | 'cancelada'. Tres caminos, y el orden importa según
+// el teléfono que tengas en la mano.
+
+const CACHE_CITAS = 'juego-camisetas-citas';
+const RUTA_CITA = '/cita.ics';
+
+// iPadOS moderno se presenta como Macintosh; los puntos táctiles lo delatan.
+const esIOS = () => {
+  const ua = navigator.userAgent || '';
+  return /iP(hone|od|ad)/.test(ua) ||
+    (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+};
+
+// El camino de iOS. Safari no abre el calendario desde un blob: ni desde un
+// data:; necesita navegar a una URL que responda con Content-Type
+// text/calendar. Como no hay backend, el service worker fabrica esa
+// respuesta: el app deja el .ics en una caché y pide la ruta. Nada sale a la
+// red — /cita.ics no existe en el servidor y no hace falta que exista.
+//
+// Va por iframe y no por navegación de la pestaña: si el documento de arriba
+// se va, el PWA se recarga y pierdes el paso en el que ibas.
+async function porServiceWorker(ics) {
+  if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) return false;
+  if (typeof caches === 'undefined') return false;
+  try {
+    const cache = await caches.open(CACHE_CITAS);
+    await cache.put(RUTA_CITA, new Response(ics, {
+      headers: {
+        'Content-Type': 'text/calendar; charset=utf-8',
+        // inline y no attachment: attachment le dice a iOS "guarda esto en
+        // Archivos", que es exactamente el paseo que queremos evitar.
+        'Content-Disposition': 'inline; filename="cita.ics"',
+      },
+    }));
+    const marco = document.createElement('iframe');
+    marco.style.display = 'none';
+    marco.src = RUTA_CITA;
+    document.body.appendChild(marco);
+    setTimeout(() => marco.remove(), 20000);
+    return true;
+  } catch (e) {
+    console.error('cita/sw:', e);
+    return false;
+  }
+}
+
 export async function entregarCita(ics, nombreArchivo = 'cita.ics') {
+  if (esIOS() && await porServiceWorker(ics)) return 'entregada';
+
   const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
 
+  // Android: el share sheet deja escoger Google Calendar y funciona bien.
   try {
     const archivo = new File([blob], nombreArchivo, { type: 'text/calendar' });
     if (navigator.canShare?.({ files: [archivo] })) {
@@ -107,6 +152,7 @@ export async function entregarCita(ics, nombreArchivo = 'cita.ics') {
     if (e?.name === 'AbortError') return 'cancelada';
   }
 
+  // Escritorio: descargar el .ics es el gesto normal y el sistema lo abre.
   const url = URL.createObjectURL(blob);
   try {
     const a = document.createElement('a');
