@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Check, X, GripVertical, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home } from 'lucide-react';
 import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encodeCamisetaToJSON, decodeJSONToCamiseta } from './codec/index.js';
 import { elegirEco, silenciarEco, citaVigente } from './ecos/index.js';
@@ -1085,6 +1086,22 @@ function QuickNoteButton({ onClick }) {
 }
 
 // Hoja de nota rápida — captura un pensamiento suelto sin abrir un check-in.
+// Una capa a pantalla completa (hojas y modales).
+//
+// `position: fixed` se mide contra la pantalla... salvo que algún ancestro
+// tenga un transform, y entonces se mide contra ESE ancestro. Nuestro
+// `.fade-up` termina la animación con un transform de identidad puesto —el
+// fill-mode lo deja pegado— así que toda vista animada se vuelve una trampa:
+// la capa se ancla al alto de la página en vez de al alto de la pantalla y
+// aparece cientos de píxeles más abajo, con media lista fuera del mundo.
+// Sacarla al <body> devuelve a "fixed" su significado, y de paso la pone por
+// encima de la barra de pestañas, que si no se le monta encima y se come los
+// toques de la parte de abajo.
+function Capa({ children }) {
+  if (typeof document === 'undefined') return children;
+  return createPortal(children, document.body);
+}
+
 function QuickNoteSheet({ onClose, onSave }) {
   const [texto, setTexto] = useState('');
   useEffect(() => {
@@ -1093,7 +1110,7 @@ function QuickNoteSheet({ onClose, onSave }) {
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
+    <Capa><div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
       style={{ background: 'rgba(28, 24, 19, 0.55)' }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md my-auto max-h-[90vh] overflow-y-auto"
         style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
@@ -1115,7 +1132,7 @@ function QuickNoteSheet({ onClose, onSave }) {
           </button>
         </div>
       </div>
-    </div>
+    </div></Capa>
   );
 }
 
@@ -1198,7 +1215,7 @@ function CitaSheet({ cadencia, origen, onAgendar, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
+    <Capa><div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
       style={{ background: 'rgba(10, 10, 10, 0.72)' }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md my-auto max-h-[90vh] overflow-y-auto"
         style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
@@ -1244,7 +1261,7 @@ function CitaSheet({ cadencia, origen, onAgendar, onClose }) {
             style={{ color: 'var(--ink-faint)' }}>{TEXTOS.cita.descartar}</button>
         </div>
       </div>
-    </div>
+    </div></Capa>
   );
 }
 
@@ -1939,8 +1956,8 @@ function MoverSheet({ cam, cerros, cams, onMover, onCrearCerro, onClose }) {
   const [nuevo, setNuevo] = useState(null);   // null = no está creando; string = nombre en curso
   const ocupante = (i) => cams.find(c => c.id !== cam.id && enGancho(c, i));
   const ir = (u) => { onMover(cam.id, u); onClose(); };
-  return (<div className="fixed inset-0 flex items-end justify-center" style={{ zIndex: 150, background: 'rgba(4,2,10,0.72)' }} onClick={onClose}>
-    <div className="w-full max-w-xl p-5 fade-up" style={{ background: 'var(--bg)', borderTop: '1px solid var(--cian)', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+  return (<Capa><div className="fixed inset-0 flex items-end justify-center" style={{ zIndex: 150, background: 'rgba(4,2,10,0.72)' }} onClick={onClose}>
+    <div className="w-full max-w-xl p-5 fade-up" style={{ background: 'var(--bg)', borderTop: '1px solid var(--cian)', maxHeight: '80vh', overflowY: 'auto', paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }} onClick={e => e.stopPropagation()}>
       <div className="flex items-baseline justify-between mb-4">
         <span className="ff-serif text-lg">{cam.emoji} {cam.nombre}</span>
         <button onClick={onClose} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Cerrar"><X size={16} /></button>
@@ -1986,7 +2003,7 @@ function MoverSheet({ cam, cerros, cams, onMover, onCrearCerro, onClose }) {
         ))}
       </div>
     </div>
-  </div>);
+  </div></Capa>);
 }
 
 function FilaCamiseta({ cam, agarrar, onOpen, atenuada }) {
@@ -2741,7 +2758,7 @@ function ShareSheet({ cam, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
+    <Capa><div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
       style={{ background: 'rgba(28, 24, 19, 0.55)' }}
       onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md my-auto max-h-[90vh] overflow-y-auto"
@@ -2841,7 +2858,7 @@ function ShareSheet({ cam, onClose }) {
           )}
         </div>
       </div>
-    </div>
+    </div></Capa>
   );
 }
 
