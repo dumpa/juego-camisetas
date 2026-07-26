@@ -34,6 +34,32 @@ export const TEXTOS = {
     descartar: 'ahora no',
   },
 
+  // El cierre del día no tiene cita en el calendario y sí tiene eco. La
+  // diferencia no es un descuido: una alarma diaria se vuelve papel tapiz en
+  // cuatro días y de paso te enseña a ignorar las otras. El eco, en cambio,
+  // te encuentra dentro del app, que es donde ya estabas.
+  //
+  // Sale haya o no haya misiones marcadas, y esa es la corrección importante:
+  // el cierre no termina en la lista, termina en "¿qué movió el día?". Un día
+  // sin nada marcado puede tener mucho que contestar ahí —y a veces es el que
+  // más—. Condicionar el eco a lo cumplido habría convertido la reflexión en
+  // premio por rendimiento, que es la gamificación por la puerta de atrás.
+  //
+  // Por lo mismo las frases no celebran ni cuentan nada: nombran la pregunta
+  // y dejan dicho que un día flojo también se firma (regla 6).
+  cerrarDia: {
+    frases: [
+      { titulo: '¿Qué movió el día?',
+        cuerpo: 'Esa línea es el cierre. Lo marcado es lo de menos.' },
+      { titulo: 'Falta firmar el día.',
+        cuerpo: 'Un minuto, y no hace falta que haya sido un buen día.' },
+      { titulo: 'El día pide una línea.',
+        cuerpo: 'La que importe. Aunque sea para decir que no pasó nada.' },
+    ],
+    accion: 'cerrar el día',
+    descartar: 'ahora no',
+  },
+
   cita: {
     titulo: 'La próxima cita.',
     // Lo que se ve arriba de la hoja según de dónde venga.

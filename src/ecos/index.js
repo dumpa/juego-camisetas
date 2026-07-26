@@ -137,15 +137,67 @@ function fuenteAgendar(cadencia, vencimientoDias, silencioDias, rodajeDias) {
   };
 }
 
-// El orden es la prioridad. La semana antes que el mes: la cadencia corta
-// sostiene, la larga corrige, y de nada sirve corregir lo que no se sostiene.
+// A partir de esta hora tiene sentido hablar de cerrar el día. Antes, el día
+// todavía se está haciendo.
+const HORA_CIERRE_DIA = 18;
+
+const fechaDe = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// ¿Se cerró el día de hoy?
+function cerroElDia(state, ahora) {
+  const ult = ultimaSesion(state, 'diaria');
+  if (!ult) return false;
+  const d = new Date(ult.date);
+  return !isNaN(d.getTime()) && d.toDateString() === ahora.toDateString();
+}
+
+// Fuente: cerrar el día.
 //
-// El check-in diario no está aquí y no es un olvido: el hacedor vuelve
-// porque hay trabajo, no porque suene una alarma. Un evento diario en el
-// calendario se vuelve ruido en cuatro días y se apaga en cinco.
+// No mira si hay misiones marcadas, a propósito. El cierre no termina en la
+// lista: termina en "¿qué movió el día?", y esa respuesta no depende de haber
+// cumplido nada. Un día sin una sola marca puede ser el que más tenga que
+// decir. Pedir rendimiento para merecer la reflexión sería gamificación
+// disfrazada de criterio (regla 4).
+//
+// Su acción no es una cita: abre el check-in ahí mismo. Es el único eco que
+// pide algo que se hace en el momento, y por eso es el único que no pasa por
+// el calendario.
+function fuenteCerrarDia(state, ctx) {
+  const { ahora } = ctx;
+  if (ahora.getHours() < HORA_CIERRE_DIA) return null;
+  if (!tieneRodaje(state, ahora, 0)) return null;
+  if (cerroElDia(state, ahora)) return null;
+
+  const fecha = fechaDe(ahora);
+  const t = variante(TEXTOS.cerrarDia.frases, fecha);
+  if (!t) return null;
+
+  return {
+    // La clave lleva la fecha: descartarlo lo apaga hoy y mañana es otro eco,
+    // con otra clave. Así no hace falta un silencio de horas.
+    clave: `cerrar-dia:${fecha}`,
+    fuente: 'cerrar-dia',
+    titulo: t.titulo,
+    cuerpo: t.cuerpo,
+    tono: 'var(--gold)',
+    accion: { etiqueta: TEXTOS.cerrarDia.accion, tipo: 'sesion', cadencia: 'diaria' },
+    descartar: TEXTOS.cerrarDia.descartar,
+    silencioDias: 1,
+  };
+}
+
+// El orden es la prioridad, y va de lo raro a lo frecuente. Los ecos de
+// agendar aparecen pocas veces al mes; el del día, casi todas las tardes. Si
+// el frecuente fuera primero, el raro no saldría nunca —cada vez que le
+// tocara turno habría un cierre de día tapándolo—.
+//
+// Entre semana y mes: la semana primero. La cadencia corta sostiene, la
+// larga corrige, y de nada sirve corregir lo que no se sostiene.
 export const FUENTES = [
   fuenteAgendar('semanal', 7, 7, 7),
   fuenteAgendar('mensual', 28, 21, 21),
+  fuenteCerrarDia,
 
   // Pendientes para la próxima sesión (pieza 3 del plan v1). Cada una es una
   // función más en este arreglo; lo difícil de todas es el criterio de
