@@ -27,6 +27,10 @@ const AL_SIN_DOBLAR = () => ({ tipo: 'cerro', cerroId: CERRO_SIN_DOBLAR });
 const estaPuesta = (c) => c?.ubicacion?.tipo === 'puesta';
 const enGancho = (c, i) => c?.ubicacion?.tipo === 'gancho' && c.ubicacion.posicion === i;
 const enCerro = (c, id) => c?.ubicacion?.tipo === 'cerro' && c.ubicacion.cerroId === id;
+// La ropa sin doblar vive al fondo del montón, no encima de los cerros que
+// uno se tomó el trabajo de nombrar. El del sistema siempre va de último.
+const ordenarCerros = (cerros) => [...(cerros || [])].sort((a, b) =>
+  (a.esDelSistema ? 1 : 0) - (b.esDelSistema ? 1 : 0) || (a.orden ?? 0) - (b.orden ?? 0));
 const mismaUbicacion = (a, b) => !!a && !!b && a.tipo === b.tipo &&
   a.posicion === b.posicion && a.cerroId === b.cerroId;
 
@@ -674,6 +678,16 @@ export default function App() {
     const orden = s.cerros.reduce((mx, c) => Math.max(mx, c.orden ?? 0), 0) + 1;
     s.cerros.push({ id: uid(), nombre: n, orden, esDelSistema: false });
   });
+  // Doblar en un cerro que todavía no existe: se crea y se guarda en la
+  // misma movida, para no dejar un cerro vacío si algo se interrumpe.
+  const doblarEnNuevoCerro = (camId, nombre) => update(s => {
+    const n = (nombre || '').trim();
+    if (!n) return;
+    const orden = s.cerros.reduce((mx, c) => Math.max(mx, c.orden ?? 0), 0) + 1;
+    const id = uid();
+    s.cerros.push({ id, nombre: n, orden, esDelSistema: false });
+    aplicarMovida(s, camId, { tipo: 'cerro', cerroId: id });
+  });
   const renombrarCerro = (id, nombre) => update(s => {
     const c = s.cerros.find(x => x.id === id);
     const n = (nombre || '').trim();
@@ -966,7 +980,9 @@ export default function App() {
   if (openCam) {
     const cam = state.camisetas.find(c => c.id === openCam);
     if (!cam) { setOpenCam(null); return null; }
-    return <Frame><CamisetaDetail cam={cam} movimientos={state.movimientos} onBack={() => setOpenCam(null)}
+    return <Frame><CamisetaDetail cam={cam} cerros={state.cerros} cams={state.camisetas}
+      movimientos={state.movimientos} onBack={() => setOpenCam(null)}
+      onMover={moverCamiseta} onDoblarNuevo={doblarEnNuevoCerro}
       onAddMision={(m) => addMision(cam.id, m)}
       onEditMision={(id, d) => editMision(cam.id, id, d)}
       onToggle={(id) => toggleMision(cam.id, id)}
@@ -1025,7 +1041,7 @@ export default function App() {
         }}
         onDescartar={() => descartarEco(eco)} />}
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
-      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} />}
+      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} onDoblarNuevo={doblarEnNuevoCerro} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion}
         onAgendar={(cadencia) => setPedirCita({ cadencia, origen: 'diario' })} />}
     </main>
@@ -1913,7 +1929,8 @@ function Agarradero({ onPointerDown, label }) {
 }
 
 // La lista de sitios, para cuando arrastrar no es cómodo o no es posible.
-function MoverSheet({ cam, cerros, cams, onMover, onClose }) {
+function MoverSheet({ cam, cerros, cams, onMover, onCrearCerro, onClose }) {
+  const [nuevo, setNuevo] = useState(null);   // null = no está creando; string = nombre en curso
   const ocupante = (i) => cams.find(c => c.id !== cam.id && enGancho(c, i));
   const ir = (u) => { onMover(cam.id, u); onClose(); };
   return (<div className="fixed inset-0 flex items-end justify-center" style={{ zIndex: 150, background: 'rgba(4,2,10,0.72)' }} onClick={onClose}>
@@ -1949,6 +1966,18 @@ function MoverSheet({ cam, cerros, cams, onMover, onClose }) {
             </span>
           </button>
         ))}
+        {onCrearCerro && (nuevo === null ? (
+          <button onClick={() => setNuevo('')} className="text-left ring-ink py-2 px-3 ff-mono text-xs"
+            style={{ border: '1px dashed var(--line)', color: 'var(--ink-faint)' }}>+ cerro nuevo</button>
+        ) : (
+          <div className="flex gap-2 items-baseline fade-up">
+            <input value={nuevo} onChange={e => setNuevo(e.target.value)} autoFocus placeholder="nombre del cerro"
+              onKeyDown={e => { if (e.key === 'Enter' && nuevo.trim()) { onCrearCerro(cam.id, nuevo); onClose(); } if (e.key === 'Escape') setNuevo(null); }}
+              className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+            <button onClick={() => { if (nuevo.trim()) { onCrearCerro(cam.id, nuevo); onClose(); } }}
+              className="ring-ink ff-mono text-xs px-3 py-1" style={{ border: '1px solid var(--cian)', color: 'var(--cian)' }}>crear y doblar</button>
+          </div>
+        ))}
       </div>
     </div>
   </div>);
@@ -1971,7 +2000,7 @@ function FilaCamiseta({ cam, agarrar, onOpen, atenuada }) {
 }
 
 function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCatalogo, onImport,
-                        onReorder, onMover, onLavar, onCrearCerro, onRenombrarCerro, onBorrarCerro, onDonarCerro }) {
+                        onReorder, onMover, onLavar, onCrearCerro, onRenombrarCerro, onBorrarCerro, onDonarCerro, onDoblarNuevo }) {
   // Los cerros arrancan abiertos: un cerro sirve para saber qué hay dentro.
   // Se cierran cuando estorban, no al revés.
   const [cerrados, setCerrados] = useState(() => new Set());
@@ -1993,7 +2022,7 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
   );
 
   const puestas = cams.filter(estaPuesta);
-  const ordenados = [...cerros].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+  const ordenados = ordenarCerros(cerros);
   const toggleCerro = (id) => setCerrados(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
@@ -2006,7 +2035,7 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
   return (<div className="fade-up">
     {fantasma}
     {camMoviendo && <MoverSheet cam={camMoviendo} cerros={ordenados} cams={cams}
-      onMover={onMover} onClose={() => setMoviendo(null)} />}
+      onMover={onMover} onCrearCerro={onDoblarNuevo} onClose={() => setMoviendo(null)} />}
 
     <div className="flex items-baseline justify-between mb-6">
       <p className="ff-serif italic text-lg" style={{ color: 'var(--ink-soft)' }}>Tu clóset.</p>
@@ -2352,7 +2381,7 @@ function HoldToRelease({ label, onComplete, duration = 1500 }) {
   );
 }
 
-function CamisetaDetail({ cam, movimientos, onBack, onAddMision, onEditMision, onToggle, onUndo, onArchive, onRevive, onDelete, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam, onDonateCam }) {
+function CamisetaDetail({ cam, cerros, cams, movimientos, onBack, onMover, onDoblarNuevo, onAddMision, onEditMision, onToggle, onUndo, onArchive, onRevive, onDelete, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam, onDonateCam }) {
   const [adding, setAdding] = useState(false);
   const [addingMs, setAddingMs] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -2361,6 +2390,7 @@ function CamisetaDetail({ cam, movimientos, onBack, onAddMision, onEditMision, o
   const [confirmRetiro, setConfirmRetiro] = useState(false);
   const [confirmDonar, setConfirmDonar] = useState(false);  // abre el ritual de despedida
   const [sharing, setSharing] = useState(false);
+  const [doblando, setDoblando] = useState(false);   // hoja de destinos: a qué gancho o cerro va
   const [donateDed, setDonateDed] = useState('');  // dedicatoria del ritual, viaja con la copia compartida
   const activas = cam.misiones.filter(m => enJuego(m));
   const hechas = cam.misiones.filter(m => m.estado === 'hecha' && m.forma !== 'recurrente');
@@ -2521,14 +2551,22 @@ function CamisetaDetail({ cam, movimientos, onBack, onAddMision, onEditMision, o
         )
       ) : (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>esta camiseta vive en el closet</span>
+          <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>esta camiseta vive en el clóset</span>
           <button onClick={onReviveCam} className="ff-mono text-xs ring-ink py-1 px-3"
-            style={{ color: 'var(--moss)', border: '1px solid var(--moss)' }}>al mazo</button>
+            style={{ color: 'var(--moss)', border: '1px solid var(--moss)' }}>ponérmela</button>
+          {/* Doblar: darle un sitio. Abre la misma hoja de destinos que el
+              agarradero del clóset — un solo camino, no dos. */}
+          {onMover && (
+            <button onClick={() => setDoblando(true)} className="ff-mono text-xs ring-ink py-1 px-3"
+              style={{ color: 'var(--cian)', border: '1px solid var(--cian)' }}>doblar</button>
+          )}
           <button onClick={() => setConfirmDonar(true)} className="ff-mono text-xs ring-ink py-1 px-3"
             style={{ color: 'var(--ink-faint)' }}>donar</button>
         </div>
       )}
     </div>
+    {doblando && <MoverSheet cam={cam} cerros={ordenarCerros(cerros)} cams={cams || []}
+      onMover={(id, u) => onMover(id, u)} onCrearCerro={onDoblarNuevo} onClose={() => setDoblando(false)} />}
     {sharing && <ShareSheet cam={donateDed ? { ...cam, dedicatoria: donateDed } : cam} onClose={() => setSharing(false)} />}
   </div>);
 }
