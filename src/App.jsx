@@ -495,6 +495,7 @@ export default function App() {
   const [state, setState] = useState(null);
   const [tab, setTab] = useState('hoy');
   const [openCam, setOpenCam] = useState(null);
+  const [doblarCam, setDoblarCam] = useState(null);   // id de la camiseta a la que le estamos buscando sitio
   const [showCreate, setShowCreate] = useState(false);
   const [showCatalogo, setShowCatalogo] = useState(false);
   const [previewCat, setPreviewCat] = useState(null);
@@ -978,12 +979,25 @@ export default function App() {
       }} /></Frame>;
   }
   if (showCreate) return <Frame><CreateCamiseta onDone={(d) => { addCamiseta(d); setShowCreate(false); }} onCancel={() => setShowCreate(false)} canCancel={state.camisetas.length > 0} /></Frame>;
+  // Doblar es su propia vista. Al escoger destino la camiseta ya quedó
+  // guardada, así que se sale también de su ficha: quedarse mirándola es
+  // quedarse mirando algo que acabas de poner en su sitio.
+  if (doblarCam) {
+    const cam = state.camisetas.find(c => c.id === doblarCam);
+    if (!cam) { setDoblarCam(null); return null; }
+    const salir = () => { setDoblarCam(null); setOpenCam(null); };
+    return <Frame>
+      <DoblarView cam={cam} cerros={ordenarCerros(state.cerros)} cams={state.camisetas}
+        onMover={moverCamiseta} onCrearCerro={doblarEnNuevoCerro}
+        onSalir={salir} />
+      <TabBar tab="camisetas" setTab={(t) => { salir(); setTab(t); }} />
+    </Frame>;
+  }
   if (openCam) {
     const cam = state.camisetas.find(c => c.id === openCam);
     if (!cam) { setOpenCam(null); return null; }
-    return <Frame><CamisetaDetail cam={cam} cerros={state.cerros} cams={state.camisetas}
-      movimientos={state.movimientos} onBack={() => setOpenCam(null)}
-      onMover={moverCamiseta} onDoblarNuevo={doblarEnNuevoCerro}
+    return <Frame><CamisetaDetail cam={cam} movimientos={state.movimientos} onBack={() => setOpenCam(null)}
+      onDoblar={() => setDoblarCam(cam.id)}
       onAddMision={(m) => addMision(cam.id, m)}
       onEditMision={(id, d) => editMision(cam.id, id, d)}
       onToggle={(id) => toggleMision(cam.id, id)}
@@ -1048,7 +1062,7 @@ export default function App() {
         }}
         onDescartar={() => descartarEco(eco)} />}
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
-      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} onDoblarNuevo={doblarEnNuevoCerro} />}
+      {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} onDoblar={setDoblarCam} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion}
         onAgendar={(cadencia) => setPedirCita({ cadencia, origen: 'diario' })} />}
     </main>
@@ -1289,7 +1303,11 @@ function Frame({ children }) {
           --accent: #F3144D; --accent-soft: #DA1895;
           --ocean: #0DEDF7; --moss: #37FF14; --gold: #F4FF01; --warm: #FF9E01;
         }
-        body { font-family: 'Chakra Petch', system-ui, sans-serif; }
+        /* El color va en el body, no solo en el contenedor de Frame: si vive
+           únicamente ahí, cualquier capa montada fuera (un portal) hereda el
+           negro por defecto del navegador y el texto desaparece sobre el
+           fondo oscuro. */
+        body { font-family: 'Chakra Petch', system-ui, sans-serif; color: var(--ink); background: var(--bg); }
         .ff-serif { font-family: 'Chakra Petch', system-ui, sans-serif; }
         .ff-mono { font-family: 'Space Mono', ui-monospace, monospace; }
         /* La firma: aberración cromática. Es literalmente el mismo gesto que
@@ -1952,58 +1970,79 @@ function Agarradero({ onPointerDown, label }) {
 }
 
 // La lista de sitios, para cuando arrastrar no es cómodo o no es posible.
-function MoverSheet({ cam, cerros, cams, onMover, onCrearCerro, onClose }) {
+// Escoger dónde va una camiseta. Es una vista, no una ventana: el clóset
+// entero cabe en la pantalla, se hace scroll normal y no depende de que
+// `position: fixed` signifique lo que dice. Una hoja flotante aquí era
+// frágil y además mentía sobre lo que estás haciendo, que es abrir el
+// mueble y buscarle sitio a una prenda.
+function DoblarView({ cam, cerros, cams, onMover, onCrearCerro, onSalir }) {
   const [nuevo, setNuevo] = useState(null);   // null = no está creando; string = nombre en curso
   const ocupante = (i) => cams.find(c => c.id !== cam.id && enGancho(c, i));
-  const ir = (u) => { onMover(cam.id, u); onClose(); };
-  return (<Capa><div className="fixed inset-0 flex items-end justify-center" style={{ zIndex: 150, background: 'rgba(4,2,10,0.72)' }} onClick={onClose}>
-    <div className="w-full max-w-xl p-5 fade-up" style={{ background: 'var(--bg)', borderTop: '1px solid var(--cian)', maxHeight: '80vh', overflowY: 'auto', paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }} onClick={e => e.stopPropagation()}>
-      <div className="flex items-baseline justify-between mb-4">
-        <span className="ff-serif text-lg">{cam.emoji} {cam.nombre}</span>
-        <button onClick={onClose} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Cerrar"><X size={16} /></button>
-      </div>
-      <div className="grid gap-1">
-        {!estaPuesta(cam) && (
-          <button onClick={() => ir(PUESTA())} className="text-left ring-ink py-2 px-3 ff-serif"
-            style={{ border: '1px solid var(--line-soft)' }}>ponérmela</button>
-        )}
-        {Array.from({ length: GANCHOS }, (_, i) => {
-          const oc = ocupante(i);
-          if (enGancho(cam, i)) return null;
-          return (<button key={i} onClick={() => ir({ tipo: 'gancho', posicion: i })}
-            className="text-left ring-ink py-2 px-3 ff-serif flex items-baseline gap-2"
-            style={{ border: '1px solid var(--line-soft)' }}>
-            <span>gancho {i + 1}</span>
-            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>
-              {oc ? `· ocupado por ${oc.nombre}` : '· libre'}
-            </span>
-          </button>);
-        })}
-        {cerros.map(k => enCerro(cam, k.id) ? null : (
-          <button key={k.id} onClick={() => ir({ tipo: 'cerro', cerroId: k.id })}
-            className="text-left ring-ink py-2 px-3 ff-serif flex items-baseline gap-2"
-            style={{ border: '1px solid var(--line-soft)' }}>
-            <span>{k.nombre}</span>
-            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>
-              · {cams.filter(c => enCerro(c, k.id)).length}
-            </span>
-          </button>
-        ))}
-        {onCrearCerro && (nuevo === null ? (
-          <button onClick={() => setNuevo('')} className="text-left ring-ink py-2 px-3 ff-mono text-xs"
-            style={{ border: '1px dashed var(--line)', color: 'var(--ink-faint)' }}>+ cerro nuevo</button>
-        ) : (
-          <div className="flex gap-2 items-baseline fade-up">
-            <input value={nuevo} onChange={e => setNuevo(e.target.value)} autoFocus placeholder="nombre del cerro"
-              onKeyDown={e => { if (e.key === 'Enter' && nuevo.trim()) { onCrearCerro(cam.id, nuevo); onClose(); } if (e.key === 'Escape') setNuevo(null); }}
-              className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
-            <button onClick={() => { if (nuevo.trim()) { onCrearCerro(cam.id, nuevo); onClose(); } }}
-              className="ring-ink ff-mono text-xs px-3 py-1" style={{ border: '1px solid var(--cian)', color: 'var(--cian)' }}>crear y doblar</button>
-          </div>
-        ))}
-      </div>
+  const ir = (u) => { onMover(cam.id, u); onSalir(); };
+  const fila = "w-full text-left ring-ink py-3 px-4 ff-serif flex items-baseline gap-2";
+  const marco = { background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2 };
+  return (<div className="px-5 pt-6 pb-32 max-w-2xl mx-auto fade-up">
+    <button onClick={onSalir} className="ring-ink mb-6 flex items-center gap-1 ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>
+      <ChevronLeft size={14} /> volver
+    </button>
+
+    <div className="flex items-center gap-3 mb-1">
+      <span className="text-4xl">{cam.emoji}</span>
+      <h2 className="display text-3xl">{cam.nombre}</h2>
     </div>
-  </div></Capa>);
+    <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>¿Dónde la dejas?</p>
+
+    {!estaPuesta(cam) && (<>
+      <div className="smallcaps mb-3" style={{ color: 'var(--magenta)' }}>Puesta</div>
+      <button onClick={() => ir(PUESTA())} className={fila + ' mb-10'} style={marco}>
+        <span className="flex-1">ponérmela</span>
+        <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />
+      </button>
+    </>)}
+
+    <div className="smallcaps mb-3" style={{ color: 'var(--cian)' }}>Ganchos</div>
+    <div className="grid gap-2 mb-10">
+      {Array.from({ length: GANCHOS }, (_, i) => {
+        const oc = ocupante(i);
+        const aqui = enGancho(cam, i);
+        return (<button key={i} onClick={() => aqui || ir({ tipo: 'gancho', posicion: i })} disabled={aqui}
+          className={fila} style={{ ...marco, borderStyle: oc || aqui ? 'solid' : 'dashed', opacity: aqui ? 0.45 : 1 }}>
+          <span>gancho {i + 1}</span>
+          <span className="ff-mono text-xs flex-1" style={{ color: 'var(--ink-faint)' }}>
+            {aqui ? '· aquí está' : oc ? `· ocupado por ${oc.nombre}` : '· libre'}
+          </span>
+          {!aqui && <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />}
+        </button>);
+      })}
+    </div>
+
+    <div className="smallcaps mb-3" style={{ color: 'var(--violeta-luz)' }}>Cerros</div>
+    <div className="grid gap-2">
+      {cerros.map(k => {
+        const aqui = enCerro(cam, k.id);
+        return (<button key={k.id} onClick={() => aqui || ir({ tipo: 'cerro', cerroId: k.id })} disabled={aqui}
+          className={fila} style={{ ...marco, opacity: aqui ? 0.45 : 1 }}>
+          <span>{k.nombre}</span>
+          <span className="ff-mono text-xs flex-1" style={{ color: 'var(--ink-faint)' }}>
+            {aqui ? '· aquí está' : `· ${cams.filter(c => enCerro(c, k.id)).length}`}
+          </span>
+          {!aqui && <ChevronRight size={16} strokeWidth={1.4} style={{ color: 'var(--ink-faint)' }} />}
+        </button>);
+      })}
+      {onCrearCerro && (nuevo === null ? (
+        <button onClick={() => setNuevo('')} className="w-full text-left ring-ink py-3 px-4 ff-mono text-xs"
+          style={{ border: '1px dashed var(--line)', borderRadius: 2, color: 'var(--ink-faint)' }}>+ cerro nuevo</button>
+      ) : (
+        <div className="flex gap-2 items-baseline fade-up">
+          <input value={nuevo} onChange={e => setNuevo(e.target.value)} autoFocus placeholder="nombre del cerro"
+            onKeyDown={e => { if (e.key === 'Enter' && nuevo.trim()) { onCrearCerro(cam.id, nuevo); onSalir(); } if (e.key === 'Escape') setNuevo(null); }}
+            className="flex-1 ff-serif text-lg pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+          <button onClick={() => { if (nuevo.trim()) { onCrearCerro(cam.id, nuevo); onSalir(); } }}
+            className="ring-ink ff-mono text-xs px-3 py-2" style={{ border: '1px solid var(--cian)', color: 'var(--cian)' }}>crear y doblar</button>
+        </div>
+      ))}
+    </div>
+  </div>);
 }
 
 function FilaCamiseta({ cam, agarrar, onOpen, atenuada }) {
@@ -2023,7 +2062,7 @@ function FilaCamiseta({ cam, agarrar, onOpen, atenuada }) {
 }
 
 function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCatalogo, onImport,
-                        onReorder, onMover, onLavar, onCrearCerro, onRenombrarCerro, onBorrarCerro, onDonarCerro, onDoblarNuevo }) {
+                        onReorder, onMover, onLavar, onCrearCerro, onRenombrarCerro, onBorrarCerro, onDonarCerro, onDoblar }) {
   // Los cerros arrancan abiertos: un cerro sirve para saber qué hay dentro.
   // Se cierran cuando estorban, no al revés.
   const [cerrados, setCerrados] = useState(() => new Set());
@@ -2032,7 +2071,7 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
   const [renombrando, setRenombrando] = useState(null);
   const [borrando, setBorrando] = useState(null);
   const [donando, setDonando] = useState(null);
-  const [moviendo, setMoviendo] = useState(null);
+
 
   const { agarrar, fantasma, zona, arrastrando } = useArrastre(
     (cam, destino) => {
@@ -2041,7 +2080,7 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
       else if (tipo === 'gancho') onMover(cam.id, { tipo: 'gancho', posicion: Number(arg) });
       else if (tipo === 'cerro') onMover(cam.id, { tipo: 'cerro', cerroId: arg });
     },
-    (cam) => setMoviendo(cam.id),
+    (cam) => onDoblar(cam.id),
   );
 
   const puestas = cams.filter(estaPuesta);
@@ -2053,12 +2092,9 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
     ? { borderColor: 'var(--cian)', boxShadow: '0 0 0 1px var(--magenta), 0 0 18px -4px var(--cian)' }
     : { borderColor: 'var(--line-soft)' };
 
-  const camMoviendo = moviendo ? cams.find(c => c.id === moviendo) : null;
 
   return (<div className="fade-up">
     {fantasma}
-    {camMoviendo && <MoverSheet cam={camMoviendo} cerros={ordenados} cams={cams}
-      onMover={onMover} onCrearCerro={onDoblarNuevo} onClose={() => setMoviendo(null)} />}
 
     <div className="flex items-baseline justify-between mb-6">
       <p className="ff-serif italic text-lg" style={{ color: 'var(--ink-soft)' }}>Tu clóset.</p>
@@ -2404,7 +2440,7 @@ function HoldToRelease({ label, onComplete, duration = 1500 }) {
   );
 }
 
-function CamisetaDetail({ cam, cerros, cams, movimientos, onBack, onMover, onDoblarNuevo, onAddMision, onEditMision, onToggle, onUndo, onArchive, onRevive, onDelete, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam, onDonateCam }) {
+function CamisetaDetail({ cam, movimientos, onBack, onDoblar, onAddMision, onEditMision, onToggle, onUndo, onArchive, onRevive, onDelete, onAddMilestone, onToggleMilestone, onCobrarMilestone, onEditMilestone, onEditCam, onReviveCam, onArchiveCam, onDonateCam }) {
   const [adding, setAdding] = useState(false);
   const [addingMs, setAddingMs] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -2413,7 +2449,6 @@ function CamisetaDetail({ cam, cerros, cams, movimientos, onBack, onMover, onDob
   const [confirmRetiro, setConfirmRetiro] = useState(false);
   const [confirmDonar, setConfirmDonar] = useState(false);  // abre el ritual de despedida
   const [sharing, setSharing] = useState(false);
-  const [doblando, setDoblando] = useState(false);   // hoja de destinos: a qué gancho o cerro va
   const [donateDed, setDonateDed] = useState('');  // dedicatoria del ritual, viaja con la copia compartida
   const activas = cam.misiones.filter(m => enJuego(m));
   const hechas = cam.misiones.filter(m => m.estado === 'hecha' && m.forma !== 'recurrente');
@@ -2577,10 +2612,10 @@ function CamisetaDetail({ cam, cerros, cams, movimientos, onBack, onMover, onDob
           <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>esta camiseta vive en el clóset</span>
           <button onClick={onReviveCam} className="ff-mono text-xs ring-ink py-1 px-3"
             style={{ color: 'var(--moss)', border: '1px solid var(--moss)' }}>ponérmela</button>
-          {/* Doblar: darle un sitio. Abre la misma hoja de destinos que el
-              agarradero del clóset — un solo camino, no dos. */}
-          {onMover && (
-            <button onClick={() => setDoblando(true)} className="ff-mono text-xs ring-ink py-1 px-3"
+          {/* Doblar: darle un sitio. Abre la misma vista que el agarradero
+              del clóset — un solo camino, no dos. */}
+          {onDoblar && (
+            <button onClick={onDoblar} className="ff-mono text-xs ring-ink py-1 px-3"
               style={{ color: 'var(--cian)', border: '1px solid var(--cian)' }}>doblar</button>
           )}
           <button onClick={() => setConfirmDonar(true)} className="ff-mono text-xs ring-ink py-1 px-3"
@@ -2588,12 +2623,6 @@ function CamisetaDetail({ cam, cerros, cams, movimientos, onBack, onMover, onDob
         </div>
       )}
     </div>
-    {/* Al escoger destino la camiseta ya quedó guardada: quedarse en su
-        ficha es quedarse mirando algo que acabas de poner en su sitio. */}
-    {doblando && <MoverSheet cam={cam} cerros={ordenarCerros(cerros)} cams={cams || []}
-      onMover={(id, u) => { onMover(id, u); onBack(); }}
-      onCrearCerro={(id, n) => { onDoblarNuevo(id, n); onBack(); }}
-      onClose={() => setDoblando(false)} />}
     {sharing && <ShareSheet cam={donateDed ? { ...cam, dedicatoria: donateDed } : cam} onClose={() => setSharing(false)} />}
   </div>);
 }
