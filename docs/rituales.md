@@ -30,7 +30,7 @@ La palabra **check-in se jubila**. No es cosmético: obligaba a que la sesión s
 | Posición | Ritual | Cadencia |
 |---|---|---|
 | Hacedor → jefe | **Escoger la ropa de mañana** | diaria |
-| Jefe | **El taller** (coser, remendar) | ~semanal |
+| Jefe | **El costurero** (coser, remendar) | ~semanal |
 | Observador | **El observador del observador** | ~mensual |
 
 Prohibidas en la UI: *mentor*, *testigo*, *vigilar*. También *racha*, *puntaje de desempeño*, *cumplimiento*.
@@ -41,26 +41,26 @@ Prohibidas en la UI: *mentor*, *testigo*, *vigilar*. También *racha*, *puntaje 
 
 **El cambio de turno.** El hacedor entrega el día y el jefe deja puesto lo de mañana. Antes de este rediseño, el ritual diario solo anotaba puntos — es decir, le pedía al usuario que fuera la base de datos de algo que el app ya sabía. No aportaba nada.
 
-Lo que sí faltaba: **nadie dejaba el trabajo listo para el hacedor de mañana.** Lo dejaba el taller, hasta con siete días de anticipación. Demasiado grueso. El cierre del día es la pasada fina.
+Lo que sí faltaba: **nadie dejaba el trabajo listo para el hacedor de mañana.** Lo dejaba el costurero, hasta con siete días de anticipación. Demasiado grueso. El cierre del día es la pasada fina.
 
-No se escogen misiones. Escoger misiones es engorroso y además le quitaría el oficio al taller. **Se escoge quién vas a ser, no qué vas a hacer.** La idea de fondo: puedes tener muchas camisetas puestas a la vez, pero un día solo cabe en dos o tres. La identidad se acumula; el día no.
+No se escogen misiones. Escoger misiones es engorroso y además le quitaría el oficio al costurero. **Se escoge qué vas a vestir, no qué vas a hacer.** La idea de fondo: puedes tener muchas camisetas puestas a la vez, pero un día solo cabe en dos o tres. La identidad se acumula; el día no.
 
 ### Por qué son dos pasos y no uno
 
-1. **¿Quién no voy a ser mañana?** — lista de lo que traes puesto. X manda al clóset.
-2. **¿Quién voy a ser mañana?** — lista del clóset. Botón "ponérmelas".
+1. **¿Qué camisetas no voy a vestir mañana?** — lista de lo que traes puesto. X manda al clóset.
+2. **¿Cuáles voy a vestir mañana?** — lista del clóset. Botón "ponérmelas".
 
-Partirlo es **deliberado y no negociable**. No es ineficiencia: son dos momentos de reflexión distintos, y sus universos son distintos (lo que ya eres vs. lo que podrías ser). Es la analogía de hacer maleta: primero saco lo que no llevo, después meto lo que llevo; hacerlo todo a la vez enreda. Este ritual **no está optimizado para la rapidez, está diseñado como una conversación con uno mismo.**
+Partirlo es **deliberado y no negociable**. No es ineficiencia: son dos momentos de reflexión distintos, y sus universos son distintos (lo que traes puesto vs. lo que está en el clóset). Es la analogía de hacer maleta: primero saco lo que no llevo, después meto lo que llevo; hacerlo todo a la vez enreda. Este ritual **no está optimizado para la rapidez, está diseñado como una conversación con uno mismo.**
 
 Reglas que salen de ahí:
 - Una camiseta **nunca aparece en los dos pasos**.
 - Se puede devolver. Quitarse una y arrepentirse es parte de pensar, no un error que corregir.
 - **Sin misiones en esta pantalla.** Solo nombres de camisetas, lista plana, rápida de recorrer.
-- La redacción de las preguntas carga el peso. "Quién no voy a ser mañana" ≠ "cuáles no me pongo": lo segundo es logística.
+- La redacción de las preguntas es **literal y liviana, a propósito** (15 ago 2026). Se pregunta qué se viste, no quién se es: una pregunta solemne le pone duelo a quitarse una camiseta, y quitársela tiene que seguir siendo barato (ver `docs/brief.md`). *Vestir* carga solo, sin subrayarlo — en español uno viste la camiseta de un equipo. **Corrige a la versión anterior de este documento**, que pedía peso en la redacción y descartaba "cuáles no me pongo" por logística; se cambió sabiendo lo que decía.
 
 ### Lavar la ropa
 
-Sigue siendo el **botón de pánico**: quitarse 19 camisetas son 19 clics o un solo botón. Es liberación, no mantenimiento. Puede aparecer en el paso 1, donde ocurre la fricción. Que exista no lo obliga a usarse; que nadie más lo use no es razón para quitarlo.
+Sigue siendo el **botón de pánico**: quitarse 19 camisetas son 19 clics o un solo botón. Es liberación, no mantenimiento. **Vive solo en el clóset** (15 ago 2026): no entra al ritual diario. Meterlo en el paso 1 pondría un atajo para las 19 justo donde el ritual pide mirarlas una por una. Que exista no lo obliga a usarse; que nadie más lo use no es razón para quitarlo.
 
 ### El pago
 
@@ -78,13 +78,13 @@ Una vez hecho, está hecho para ese día. Si se hizo en la mañana, en la noche 
 
 Al día siguiente **no se evalúa** si de verdad te pusiste lo que escogiste. Lo de mañana es una propuesta, no un contrato. Preguntar "¿lo hiciste?" es el conteo de ausencias entrando por la puerta de atrás, y es lo primero que va a proponer cualquiera que implemente esto.
 
-## 4. El taller
+## 4. El costurero
 
 ### Qué pretende
 
 Es donde **se escribe el juego**: puntos arriba y abajo, misiones nuevas, hitos nuevos, ajustar dificultad, cambiar la forma. Su producto no es una reflexión: es que el hacedor de la semana entrante encuentre trabajo listo.
 
-La línea con el ritual diario: **el diario escoge, el taller escribe.** El diario saca de lo que ya existe; el taller decide qué debería existir. Si el diario empieza a crear, el taller se queda sin oficio y el diario deja de ser corto.
+La línea con el ritual diario: **el diario escoge, el costurero escribe.** El diario saca de lo que ya existe; el costurero decide qué debería existir. Si el diario empieza a crear, el costurero se queda sin oficio y el diario deja de ser corto.
 
 ### Reglas
 
@@ -95,7 +95,7 @@ La línea con el ritual diario: **el diario escoge, el taller escribe.** El diar
 
 ### Una señal que viene del diario
 
-Una camiseta que se escogió para mañana y **no tiene ninguna misión que hacer** es la señal más útil que produce el sistema. El diario la marca; el taller la resuelve. Ahí no hay solapamiento entre los dos rituales.
+Una camiseta que se escogió para mañana y **no tiene ninguna misión que hacer** es la señal más útil que produce el sistema. El diario la marca; el costurero la resuelve. Ahí no hay solapamiento entre los dos rituales.
 
 ## 5. El observador del observador
 
@@ -136,7 +136,7 @@ Aquí es donde encaja la idea del parte visual (grilla de puntos, visualización
 Las mecánicas no distinguen a los tres rituales — los tres manipulan camisetas. **La reflexión sí.** Si las tres tienen la misma reflexión genérica, dejan de ser tres posiciones y se vuelven una sola sesión a tres velocidades.
 
 - **Diaria:** contestable en un respiro y **sin respuesta equivocada**. "¿Qué movió el día?" ya funciona.
-- **Taller:** sobre el trabajo y su dirección.
+- **Costurero:** sobre el trabajo y su dirección.
 - **Observador:** las difíciles. Las preguntas que siguen sin respuesta; las metas largas donde no se siente progreso; todo lo que no está en la lista pero podría estar; cómo te disrumpirías a ti mismo.
 
 Dos reglas de protección:
@@ -161,24 +161,22 @@ Prohibido, en cualquier ritual, pantalla o eco:
 
 ## 8. Cómo se conectan
 
-**La cita.** Un ritual sin hora es un deseo. Solo se agendan el taller y el observador: al hacedor lo llama el trabajo. Evento único no recurrente, reagendado al cerrar cada sesión — es un compromiso, no una configuración. `.ics` generado en el cliente con `VALARM`; en iOS se sirve por el service worker (ver restricción técnica en el brief; no "simplificar" eso a una descarga).
+**La cita.** Un ritual sin hora es un deseo. Solo se agendan el costurero y el observador: al hacedor lo llama el trabajo. Evento único no recurrente, reagendado al cerrar cada sesión — es un compromiso, no una configuración. `.ics` generado en el cliente con `VALARM`; en iOS se sirve por el service worker (ver restricción técnica en el brief; no "simplificar" eso a una descarga).
 
 **El eco.** Una sola voz a la vez. Devuelve material propio del usuario. El eco del día abre el ritual diario y no exige que haya nada cumplido.
 
 Distinguir **la puerta del eco**: la puerta al ritual diario está siempre disponible; el eco es la voz que invita, y esa sí habla una vez y caduca. El eco puede asomarse en dos momentos —al abrir en la mañana y al caer la tarde— pero **no habla dos veces el mismo día**: si ya invitó, o si el ritual ya se hizo, se calla. Descartarlo apaga solo ese día. Y el texto no puede decir "cierra el día" en la mañana; cada momento tiene su frase.
 
-**El circuito.** El ritual diario produce, sin que nadie escriba nada, el material que el observador necesita: qué te pusiste, qué escogiste una sola vez, qué nunca sacaste del clóset. El taller consume las señales que marca el diario. Los tres se alimentan; ninguno le pide al usuario que reporte.
+**El circuito.** El ritual diario produce, sin que nadie escriba nada, el material que el observador necesita: qué te pusiste, qué escogiste una sola vez, qué nunca sacaste del clóset. El costurero consume las señales que marca el diario. Los tres se alimentan; ninguno le pide al usuario que reporte.
 
 ## 9. Hilos abiertos
 
 Decisiones **no tomadas**. No resolverlas por cuenta propia al implementar.
 
-1. **"Puesta" pasa a ser una variable diaria.** Antes era un estado durable. Consecuencia sin resolver: "no me la pongo mañana" y "ya no soy eso" quedan siendo el mismo gesto, así que la camiseta abandonada **hay que calcularla desde el historial de elecciones**, no desde el estado. Decisión del autor: se mejora después, no bloquea.
-2. El nombre del ritual semanal. "Taller de costura" o solo "el taller" — pendiente si el primero asusta.
-3. El criterio de selección del eco: qué fragmento propio merece volver.
-4. Dónde vive el doblado en bloque. Argumento actual: dentro del observador, donde revisar ya es lo que se está haciendo. Nunca como botón suelto de "doblar la ropa" — lavar no tiene decisiones y doblar son puras decisiones, y eso sería un modo de clasificar.
-5. Si "lavar la ropa" aparece dentro del paso 1 del ritual diario o solo en el clóset.
-6. El banco de preguntas y frases por cadencia: sin escribir.
+1. **"Puesta" pasa a ser una variable diaria.** Antes era un estado durable. Consecuencia sin resolver: la camiseta abandonada **hay que calcularla desde el historial de elecciones**, no desde el estado — y ya no desde `archived_at`, que se elimina (ver `docs/decisiones.md`). Decisión del autor: se mejora después, no bloquea.
+2. El criterio de selección del eco: qué fragmento propio merece volver.
+3. Dónde vive el doblado en bloque. Argumento actual: dentro del observador, donde revisar ya es lo que se está haciendo. Nunca como botón suelto de "doblar la ropa" — lavar no tiene decisiones y doblar son puras decisiones, y eso sería un modo de clasificar.
+4. El banco de preguntas y frases por cadencia: sin escribir.
 
 ## Apéndice — qué existe hoy
 
@@ -190,4 +188,4 @@ Estado aproximado a agosto 2026; **verificar contra el repo antes de tocar nada.
 - Ecos v1: motor con fuentes puras, una voz a la vez, ecos de agendar semanal, agendar mensual y cerrar el día.
 - Cita: `src/cita.js`, `.ics` en el cliente, ruta `/cita.ics` servida por el service worker para iOS.
 - Cualquier capa nueva a pantalla completa va como vista propia, no como `position: fixed` dentro de una vista animada (ver bug de `.fade-up` documentado en el proyecto).
-- `tests/codec.test.mjs` está roto desde antes (`buildCellList is not a function`).
+- Tests: `npm test` corre el round-trip del codec y el del estado (`tests/estado.test.mjs`, que prueba que exportar → importar → migrar no pierda nada). El del codec estuvo roto y se arregló el 15 ago 2026.

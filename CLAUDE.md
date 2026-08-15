@@ -25,14 +25,15 @@ npm install
 npm run dev       # localhost:5173
 npm run build     # → dist/
 npm run preview
-node --test tests/codec.test.mjs   # test de round-trip del codec (Node 22+)
+npm test          # node --test sobre tests/*.test.mjs (Node 22+)
 ```
 
-No hay `test` en package.json scripts, ni linter configurado. El test de `tests/codec.test.mjs` está roto ahora mismo (`buildCellList` no existe en `__internals` de `src/codec/index.js`) — confirmar antes de asumir que pasa.
+No hay linter configurado. Los tests corren sin dependencias, solo con el runner de Node.
 
 ## Arquitectura
 
-- **`src/App.jsx`** (~4000 líneas) — toda la app: estado, migraciones, y ~40 componentes en un solo archivo, de `emptyState`/`loadState`/`migrate` hasta `export default function App()` en la línea 494 y los componentes de UI debajo. No hay Error Boundary.
+- **`src/estado.js`** — la capa de estado: llaves de localStorage, `emptyState`/`loadState`/`saveState`, `migrate()` y `aplicarMovida()` (el único camino por el que una camiseta cambia de sitio). Vive fuera de `App.jsx` para que las migraciones se puedan correr desde Node; es lo que prueba `tests/estado.test.mjs`.
+- **`src/App.jsx`** (~3700 líneas) — el resto de la app: ~40 componentes y los handlers, en un solo archivo. No hay Error Boundary.
 - **`src/codec/index.js`** — codec propio para exportar una "camiseta" como imagen PNG (datos ocultos en la silueta de la camiseta, con Reed-Solomon) o JSON. Dos modos: `molde` (compartir diseño entre usuarios) y `snapshot` (sync personal entre dispositivos). Formatos legacy 0x04/0x05 se siguen leyendo para siempre; el encoder actual solo emite 0x08.
 - **`src/ecos/`** — motor de "ecos": mensajes contextuales que el app le muestra al usuario según el estado (no son notificaciones ni rachas). `index.js` tiene las fuentes (funciones puras `(state, ctx) -> eco | null`), `textos.js` los textos.
 - **`src/cita.js`** — genera archivos `.ics` para que el usuario agende rituales en su calendario del teléfono. Deliberadamente sin recurrencia ni seguimiento (ver comentario al inicio del archivo).
@@ -42,7 +43,7 @@ No hay `test` en package.json scripts, ni linter configurado. El test de `tests/
 
 El estado (`STATE_KEY` en localStorage, `version: 9`) tiene `camisetas` (cada una con `misiones`, `milestones`, ubicación en el clóset), `sesiones`, `eventos`, `movimientos`, `visitas`, `cerros`. El "clóset" es un mueble con 5 `GANCHOS` fijos (a propósito, no configurable) + `cerros` (pilas) ilimitados; cada camiseta está en exactamente una ubicación (`puesta`, `gancho`, o `cerro`).
 
-Migraciones (`migrate()` en App.jsx) son acumulativas por versión — al tocar el modelo de datos, sumar un paso de migración ahí, no romper los anteriores. Antes de migrar de v7 y v8 el app congela un backup crudo en `localStorage` (`state:pre-v7`, `state:pre-v8`) — nunca sobrescribir esas keys.
+Migraciones (`migrate()` en `src/estado.js`) son acumulativas por versión — al tocar el modelo de datos, sumar un paso de migración ahí, no romper los anteriores, y sumarle un caso a `tests/estado.test.mjs` que pruebe que no se pierde nada. Antes de migrar de v7 y v8 el app congela un backup crudo en `localStorage` (`state:pre-v7`, `state:pre-v8`) — nunca sobrescribir esas keys.
 
 ## Archivos que no son la fuente de verdad
 

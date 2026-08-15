@@ -70,7 +70,7 @@ Lo que se sigue de esto:
 
 ## Vocabulario
 
-- La palabra **check-in se jubila**. Los tres rituales se llaman por lo que se hace en ellos: *escoger la ropa de mañana* (diario), *el taller* (semanal), *el observador del observador* (mensual).
+- La palabra **check-in se jubila**. Los tres rituales se llaman por lo que se hace en ellos: *escoger la ropa de mañana* (diario), *el costurero* (semanal), *el observador del observador* (mensual).
 - Prohibidas en la UI: **mentor**, **testigo**, **vigilar**, **racha**, **cumplimiento**, **desempeño**.
 - Jubiladas: **mazo** (es el *clóset*), **al mazo** (es *ponérmela*).
 - Se escribe **clóset**, con tilde.
@@ -103,4 +103,4 @@ Cada una de estas parece innecesariamente complicada y tiene una razón. **No la
 - Esquema `version: 9`. Construido: el clóset (5 ganchos + cerros), lavar la ropa, donar y donar en masa, el motor de ecos, la cita `.ics`, los tres cierres en su forma vieja.
 - **Los tres rituales están en rediseño** (ver `docs/rituales.md`): el cierre diario pasa a ser *escoger la ropa de mañana*. Lo que hay hoy en el código es la versión anterior.
 - No construido: el partner por camiseta, el reporte al partner, el criterio de selección del eco, el onboarding, el manifiesto.
-- `src/AppBackup.jsx` y `src/codec/indexBackup.js` no son la fuente de verdad. `tests/codec.test.mjs` está roto desde antes.
+- `src/AppBackup.jsx` y `src/codec/indexBackup.js` no son la fuente de verdad. Los tests (`npm test`) pasan: round-trip del codec y del estado.

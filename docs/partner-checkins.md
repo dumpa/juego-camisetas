@@ -27,7 +27,7 @@ partner: {
 }
 ```
 
-`null`/ausente en camisetas viejas se trata como "sin partner" (mismo patrón que `arco: null` hoy). Migración: un paso más en `migrate()` (siguiente versión, hoy en v9) que le pone `partner: null` a toda camiseta que no lo tenga — mismo mecanismo que ya usa el resto del historial de versiones en `App.jsx`.
+`null`/ausente en camisetas viejas se trata como "sin partner" (mismo patrón que `arco: null` hoy). Migración: un paso más en `migrate()` (siguiente versión, hoy en v9) que le pone `partner: null` a toda camiseta que no lo tenga — mismo mecanismo que ya usa el resto del historial de versiones en `src/estado.js`.
 
 **Recomendación (no es la única opción):** meter `nombre` desde ya, aunque hoy no se use en ningún lado más que el propio eco. Es un campo de texto libre, cuesta lo mismo que el binario solo, y sin él el eco solo puede decir genéricamente "check-in con tu partner" en vez de poder decir "check-in con Camila". Si prefieres arrancar solo con el binario y agregar `nombre` después, es un cambio de migración menor, no hay que rediseñar nada por eso.
 
