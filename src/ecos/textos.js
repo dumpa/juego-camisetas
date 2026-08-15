@@ -34,29 +34,49 @@ export const TEXTOS = {
     descartar: 'ahora no',
   },
 
-  // El cierre del día no tiene cita en el calendario y sí tiene eco. La
+  // El ritual diario no tiene cita en el calendario y sí tiene eco. La
   // diferencia no es un descuido: una alarma diaria se vuelve papel tapiz en
   // cuatro días y de paso te enseña a ignorar las otras. El eco, en cambio,
   // te encuentra dentro del app, que es donde ya estabas.
   //
   // Sale haya o no haya misiones marcadas, y esa es la corrección importante:
-  // el cierre no termina en la lista, termina en "¿qué movió el día?". Un día
-  // sin nada marcado puede tener mucho que contestar ahí —y a veces es el que
-  // más—. Condicionar el eco a lo cumplido habría convertido la reflexión en
-  // premio por rendimiento, que es la gamificación por la puerta de atrás.
+  // el ritual no termina en la lista, termina en la ropa escogida y en una
+  // línea. Un día sin nada marcado puede tener mucho que contestar ahí —y a
+  // veces es el que más—. Condicionar el eco a lo cumplido habría convertido
+  // la reflexión en premio por rendimiento, que es la gamificación por la
+  // puerta de atrás.
   //
-  // Por lo mismo las frases no celebran ni cuentan nada: nombran la pregunta
-  // y dejan dicho que un día flojo también se firma (regla 6).
-  cerrarDia: {
-    frases: [
-      { titulo: '¿Qué movió el día?',
-        cuerpo: 'Esa línea es el cierre. Lo marcado es lo de menos.' },
-      { titulo: 'Falta firmar el día.',
-        cuerpo: 'Un minuto, y no hace falta que haya sido un buen día.' },
-      { titulo: 'El día pide una línea.',
-        cuerpo: 'La que importe. Aunque sea para decir que no pasó nada.' },
+  // Dos juegos de frases porque son dos momentos distintos del mismo acto:
+  // en la mañana se escoge la ropa de hoy y el día está por delante; al caer
+  // la tarde se escoge la de mañana y lo que se hace es entregar el turno. Un
+  // texto que diga "cierra el día" a las ocho de la mañana está mintiendo.
+  //
+  // Ninguna de las dos cuenta nada ni celebra nada: nombran el gesto y se
+  // callan (regla 6). Y ninguna dice "quién vas a ser": se viste una
+  // camiseta, no se deja de ser algo.
+  escogerLaRopa: {
+    hoy: [
+      { titulo: '¿Qué te vas a poner hoy?',
+        cuerpo: 'El día cabe en dos o tres camisetas. Escógelas antes de arrancar.' },
+      { titulo: 'La ropa de hoy está sin escoger.',
+        cuerpo: 'Un minuto ahora te ahorra el día entero decidiendo.' },
+      { titulo: 'Hoy todavía no tiene ropa.',
+        cuerpo: 'Mira lo que traes puesto y quédate con lo que vas a jugar.' },
     ],
-    accion: 'cerrar el día',
+    manana: [
+      { titulo: '¿Qué te vas a poner mañana?',
+        cuerpo: 'Déjalo escogido y mañana el trabajo ya está esperándote.' },
+      { titulo: 'Deja la ropa lista.',
+        cuerpo: 'Lo que escojas hoy es lo que vas a encontrar abierto mañana.' },
+      { titulo: 'Se acaba el día.',
+        cuerpo: 'Quítate lo que ya no juega y deja puesto lo de mañana.' },
+    ],
+    // La etiqueta del botón también cambia con el momento: en la mañana se
+    // escoge para el día que empieza, en la noche para el que viene.
+    accion: {
+      hoy: 'escoger la ropa de hoy',
+      manana: 'escoger la ropa de mañana',
+    },
     descartar: 'ahora no',
   },
 
@@ -72,7 +92,7 @@ export const TEXTOS = {
     descartar: 'ahora no',
     // Nombres por defecto del evento. El usuario los puede pisar.
     nombrePorDefecto: {
-      semanal: 'Cierre de semana',
+      semanal: 'El costurero',
       mensual: 'El observador del observador',
     },
     // Va en el cuerpo del evento del calendario, no en el app.

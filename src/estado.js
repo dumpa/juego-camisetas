@@ -18,6 +18,7 @@ export const INSTALL_KEY = 'juego-camisetas:install-ack:v1';
 // IMPORT_BACKUP guarda lo que había antes de cada import manual.
 export const BACKUP_PRE_V7_KEY = 'juego-camisetas:state:pre-v7';
 export const BACKUP_PRE_V8_KEY = 'juego-camisetas:state:pre-v8';
+export const BACKUP_PRE_V10_KEY = 'juego-camisetas:state:pre-v10';
 export const IMPORT_BACKUP_KEY = 'juego-camisetas:state:import-backup';
 export const DAY = 86400000;
 
@@ -50,7 +51,7 @@ export function isStandalone() {
 }
 
 export const emptyState = () => ({
-  user_id: 'local', version: 9, created_at: new Date().toISOString(),
+  user_id: 'local', version: 10, created_at: new Date().toISOString(),
   camisetas: [], sesiones: [], eventos: [], movimientos: [], visitas: [],
   cerros: [cerroSistema()], ecos: { silencios: {} },
 });
@@ -70,6 +71,12 @@ export async function loadState() {
         // v8: mismo seguro antes de repartir las camisetas por el mueble.
         if ((parsed.version || 0) < 8 && !localStorage.getItem(BACKUP_PRE_V8_KEY)) {
           localStorage.setItem(BACKUP_PRE_V8_KEY, raw);
+        }
+        // v10: el único paso del rediseño de los rituales que borra un campo
+        // existente (archived_at). Los otros solo añaden, y por eso no llevan
+        // respaldo. Este sí.
+        if ((parsed.version || 0) < 10 && !localStorage.getItem(BACKUP_PRE_V10_KEY)) {
+          localStorage.setItem(BACKUP_PRE_V10_KEY, raw);
         }
       } catch {}
       const s = migrate(parsed);
@@ -253,10 +260,13 @@ export function migrate(s) {
                u.posicion >= 0 && u.posicion < GANCHOS && !ganchoTomado.has(u.posicion)) {
         ganchoTomado.add(u.posicion); valida = true;
       } else if (u?.tipo === 'cerro' && idsCerro.has(u.cerroId)) valida = true;
-      // Primera corrida: lo que está archivado cae al cerro sin doblar, lo
-      // puesto sigue puesto, los cinco ganchos arrancan vacíos. Las donadas
+      // Sin ubicación válida, al cerro sin doblar. Antes esto miraba
+      // archived_at para decidir entre el cerro y "puesta"; desde v10 el
+      // campo no existe, y de todas formas el destino correcto es el cerro:
+      // "puesta" pasó a significar que hoy le estás poniendo atención, y una
+      // migración no está en posición de decidir eso por nadie. Las donadas
       // ya no están en el array, así que no se tocan.
-      if (!valida) cam.ubicacion = cam.archived_at ? AL_SIN_DOBLAR() : PUESTA();
+      if (!valida) cam.ubicacion = AL_SIN_DOBLAR();
     });
   }
   // v9 — el eco necesita recordar qué ya dijo:
@@ -268,8 +278,43 @@ export function migrate(s) {
   // 'cita_agendada' en la historia, que es donde va lo que el jefe decide.
   if (!s.ecos || typeof s.ecos !== 'object') s.ecos = {};
   if (!s.ecos.silencios || typeof s.ecos.silencios !== 'object') s.ecos.silencios = {};
-  s.version = 9;
+  // v10 — "puesta" deja de ser un estado durable y pasa a ser la atención de
+  // un día, que es lo que escoge el ritual diario.
+  //
+  // El dato no cambia de forma: una camiseta sigue estando puesta, en un
+  // gancho o en un cerro. Lo que cambia es qué quiere decir, y por eso lo
+  // único que hace este paso es dejar constancia de cuándo cambió. Sin esa
+  // marca, un cálculo que cruce la frontera lee dos cosas distintas bajo el
+  // mismo nombre y no tiene cómo saberlo.
+  //
+  // Y se va archived_at. Lo escribía aplicarMovida cada vez que una camiseta
+  // salía de "puesta": con la atención diaria eso se reescribiría todas las
+  // noches, y lavar la ropa lo estamparía en diecinueve camisetas de un
+  // golpe. Quitarse una camiseta no es archivarla. Cuándo se fue una
+  // identidad vive en el evento 'camiseta_donada', que es la única salida
+  // real. OJO: el archived_at de una MISIÓN es otro campo y se queda.
+  if (s.version < 10) {
+    pushEvento(s, { tipo: 'frontera_puesta_diaria' });
+    s.camisetas?.forEach(cam => { delete cam.archived_at; });
+  }
+  s.version = 10;
   return s;
+}
+
+// Una misión está "en juego" si vive en los buckets activos (CamisetaDetail,
+// el costurero, la cuenta de la card en CamisetasView). Las recurrentes nunca
+// desaparecen del bucket activo al completarse: siguen visibles ahí, sólo
+// que con el visual de "hecha hoy" (check + tachado), porque hacer una
+// recurrente no significa que dejó de existir — significa que ya tocó hoy.
+//
+// Vive aquí y no en App.jsx porque los ecos también la necesitan, y dos
+// copias de esta regla se desincronizan sin que nadie lo note: la señal de
+// "sin misiones que hacer" del costurero dejaría de coincidir con lo que la
+// pantalla del hacedor muestra como pendiente.
+export function enJuego(m) {
+  if (m?.estado === 'archivada') return false;
+  if (m?.forma === 'recurrente') return true;
+  return m?.estado === 'activa';
 }
 
 // Escribe un evento en la historia. Módulo, no closure: lo usan tanto los
@@ -305,13 +350,11 @@ export function aplicarMovida(s, camId, destino, opts = {}) {
     if (ocupante) {
       const destinoOcupante = antes?.tipo === 'gancho' ? { ...antes } : AL_SIN_DOBLAR();
       ocupante.ubicacion = normalizarUbicacion(s, destinoOcupante);
-      ocupante.archived_at = ocupante.archived_at || nowISO();
     }
   }
   c.ubicacion = dest;
-  // archived_at deja de gobernar el estado —lo gobierna ubicacion— pero se
-  // mantiene fiel a lo que siempre significó: cuándo dejó de estar puesta.
-  c.archived_at = dest.tipo === 'puesta' ? null : (c.archived_at || nowISO());
+  // Dónde está una camiseta lo dice ubicacion y nada más. Ya no se estampa
+  // ninguna fecha al salir de "puesta": quitársela es un gesto de un día.
   if (opts.evento !== false) {
     const eraPuesta = antes?.tipo === 'puesta';
     const esPuesta = dest.tipo === 'puesta';

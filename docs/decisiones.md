@@ -40,7 +40,7 @@ Las fechas son de cuando se cerró la decisión.
 - **El ritual de despedida no se toca.** Es lo que hace que archivar una identidad no sea borrar un registro.
 - **En la donación masiva se quita la opción de enviarle la ropa a alguien** (25 jul 2026), porque pueden ser demasiadas.
 - **Donar un cerro sí lleva ritual, pero sin envío:** el cerro simplemente desaparece.
-- **El observador no es donde se dona** (15 ago 2026). Donar ya se puede desde cualquier camiseta; un ritual mensual que solo despide no está mirando al jefe, está sacando basura.
+- **El observador no es donde se dona** (15 ago 2026). Donar ya se puede desde cualquier camiseta; un ritual mensual que solo despide no está mirando al jefe, está sacando basura. **Construido así:** el ritual mensual ya no archiva ni dona, y con eso queda **un solo camino para donar** — el ritual de despedida desde el detalle. El `confirm()` del navegador que se lo saltaba desapareció con la pantalla vieja.
 
 ## La cita
 
@@ -73,8 +73,12 @@ Detalle completo en `docs/rituales.md`. Aquí solo lo que se cerró y cuándo.
 - **La escogencia va en dos pasos** —cuáles no visto, cuáles sí— **y eso no se colapsa en uno** (15 ago 2026). Son dos momentos de reflexión con universos distintos. El ritual no está optimizado para la rapidez.
 - **Las dos preguntas del diario son literales: "¿qué camisetas no voy a vestir mañana?" y "¿cuáles voy a vestir mañana?"** (15 ago 2026; en la mañana, *hoy*). Cierra el hilo de la redacción. Se descartaron dos versiones y conviene saber por qué antes de reabrirlo: *"quién no voy a ser"* equipara la camiseta con el ser, justo lo que el brief prohíbe; *"a qué le voy a poner atención"* lo arregla pero suena importante, y la solemnidad le pone duelo a un gesto que tiene que ser barato. **Vestir** es literal y liviano, y en español ya carga lo suficiente: uno viste la camiseta de un equipo. Esto corrige la regla de `rituales.md` que pedía peso en la redacción.
 - **El ritual semanal se llama "el costurero"** (15 ago 2026). Provisional y barato de cambiar: es una palabra de UI, no una estructura. Reemplaza a "el taller" y a "taller de costura".
+- **El costurero se entra escogiendo qué camiseta remendar** (15 ago 2026), y al terminar se puede seguir con otra. Antes era un carrusel de N pasos, uno por camiseta en el orden en que estuvieran: con veinte camisetas eso es un trámite, y un trámite se abandona a la mitad.
+- **Las señales del costurero no llevan número** (15 ago 2026). "Sin misiones que hacer" y "hace rato no se juega" son booleanos: un contador de días sería una racha con otro nombre. Y una camiseta recién creada nunca sale dormida — no ha tenido cuándo jugarse, y decirlo sería un reproche por existir.
+- **El costurero ve el clóset entero, no lo puesto** (15 ago 2026). Consecuencia directa de v10: si mirara solo lo puesto, solo se podría coser lo que uno se puso esa mañana.
 - **"Lavar la ropa" vive solo en el clóset** (15 ago 2026). No entra al paso 1 del ritual diario: sería un atajo para las 19 justo donde el ritual pide mirarlas una por una. El botón de pánico se busca; no se ofrece dentro de la reflexión.
 - **Al día siguiente no se evalúa lo que se escogió.** Es una propuesta, no un contrato.
+- **El observador guarda qué comprobación mostró** (15 ago 2026), en la sesión mensual (`hallazgo`). La del mes pasado pierde la mitad de su fuerza al mes siguiente, pero no queda descalificada: si sigue siendo con diferencia lo más gordo que pasa, vuelve — y que vuelva también es información.
 - **Qué datos puede mirar el observador** (15 ago 2026): tono de las misiones, duración activa antes de archivar, gastada vs. abandonada, tasa de creación vs. juego, deriva del promedio de puntos. **Qué no:** rachas, días activos, curvas de actividad. Y se presenta una sola comprobación por sesión, convertida en pregunta — nunca un tablero.
 
 ## Datos, codec y privacidad
@@ -84,7 +88,7 @@ Detalle completo en `docs/rituales.md`. Aquí solo lo que se cerró y cuándo.
 - **El codec exporta por lista blanca**, campo por campo. Un campo nuevo no se filtra solo.
 - **Los formatos legacy se leen para siempre.**
 - **Las migraciones son acumulativas** y los respaldos crudos `state:pre-v7` / `state:pre-v8` nunca se sobrescriben.
-- **El significado de `puesta` cambia con el rediseño del ritual diario.** Antes: identidad activa, duraba meses. Después: atención de un día. **Fecha del despliegue de esa migración: ______** — anotarla aquí el día que se despliegue, porque cualquier cálculo que cruce esa frontera lee dos cosas distintas bajo el mismo nombre. No afecta la duración de una identidad, que se mide de creación a archivo.
+- **El significado de `puesta` cambia con el rediseño del ritual diario.** Antes: identidad activa, duraba meses. Después: atención de un día. La migración v10 ya no depende de que alguien anote la fecha a mano: **escribe un evento `frontera_puesta_diaria`** en la historia de cada usuario, con su propio `ts`. Cualquier cálculo que cruce esa frontera lee dos cosas distintas bajo el mismo nombre y ahora tiene cómo saberlo. No afecta la duración de una identidad, que se mide de creación a archivo.
 - **`archived_at` de la camiseta se elimina** (15 ago 2026). Hoy `aplicarMovida` lo estampa cada vez que una camiseta sale de "puesta" y lo pone en `null` cada vez que vuelve; con la atención diaria eso se reescribiría todas las noches y lavar la ropa lo estamparía en 19 camisetas de un golpe. El campo ya no tiene oficio: quitarse una camiseta no es archivarla, y la muerte de una identidad vive en el evento `camiseta_donada`, no en un campo de una camiseta que ya salió del array. Como reescribe un campo existente, esta sí lleva respaldo crudo `state:pre-v10`. **No confundir con el `archived_at` de una misión**, que se queda tal cual.
 - **Todas las aperturas del app se registran en `visitas[]`** (14 jul 2026), no una por día: el patrón de hora del día es lo que alimenta la distinción jefe/hacedor.
 
@@ -107,7 +111,6 @@ Detalle completo en `docs/rituales.md`. Aquí solo lo que se cerró y cuándo.
 No decidido. No resolverlas por cuenta propia.
 
 - **Cómo se calcula la camiseta abandonada** ahora que "puesta" es atención diaria: es la que se conserva en el clóset y nunca se escoge. Falta definir el umbral, y que no se lea como un reproche al usuario. No bloquea.
-- **Dos caminos para donar una camiseta suelta:** el ritual completo desde el detalle, y un `confirm()` del navegador desde la sesión mensual que se lo salta. Hay que unificarlos.
 - **El criterio de selección del eco:** qué fragmento propio merece volver.
 - **Dónde vive el doblado en bloque**, si se hace: dentro del observador es el argumento actual.
 - **El regalo de un milestone:** lo pone quien envía la camiseta, o es un autorregalo.

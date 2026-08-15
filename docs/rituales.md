@@ -182,10 +182,12 @@ Decisiones **no tomadas**. No resolverlas por cuenta propia al implementar.
 
 Estado aproximado a agosto 2026; **verificar contra el repo antes de tocar nada.**
 
-- Esquema v9. `visitas[]` registra todas las aperturas. Los eventos de camiseta registran entrar y salir de "puesta"; mover entre cerros y ganchos no escribe evento.
-- Sesiones: diaria, semanal y mensual, registradas por `logSesion` con tipo y fecha. Consulta `ultimosCheckins(state)` expuesta.
+- Esquema v10. `visitas[]` registra todas las aperturas. Los eventos de camiseta registran entrar y salir de "puesta"; mover entre cerros y ganchos no escribe evento.
+- Sesiones: diaria, semanal y mensual, registradas por `logSesion` con tipo y fecha. La diaria guarda además `para` (el día que se escogió), `quitadas` y `puestas`, con nombre congelado. `ultimaSesion(state, tipo)` y `yaEscogio(state, dia)` en `src/ecos/index.js`.
 - Clóset v8: 5 ganchos fijos, cerros ilimitados con nombre, cerro del sistema "sin doblar", botón "lavar la ropa", vista `DoblarView`.
-- Ecos v1: motor con fuentes puras, una voz a la vez, ecos de agendar semanal, agendar mensual y cerrar el día.
+- El costurero se entra escogiendo qué camiseta remendar, con dos señales por camiseta (`calcularSeñales` en `src/ecos/index.js`): *sin misiones que hacer* y *hace rato no se juega*. Son booleanos a propósito — un número de días aquí sería una racha con otro nombre. Ve el clóset entero, no lo que está puesto hoy.
+- El observador calcula cinco comprobaciones (`src/observador/`) y presenta una sola, la que más tenga que decir, convertida en pregunta; la del mes pasado pierde fuerza pero no queda vetada. Sin material suficiente no inventa: lo dice y pasa a la pregunta difícil del mes. Ya no archiva ni dona.
+- Ecos v1: motor con fuentes puras, una voz a la vez, ecos de agendar semanal, agendar mensual y escoger la ropa. El del ritual diario se asoma en la mañana y al caer la tarde con textos distintos, y su clave es el **día que se está escogiendo**, no el del calendario: la invitación es una por decisión.
 - Cita: `src/cita.js`, `.ics` en el cliente, ruta `/cita.ics` servida por el service worker para iOS.
 - Cualquier capa nueva a pantalla completa va como vista propia, no como `position: fixed` dentro de una vista animada (ver bug de `.fade-up` documentado en el proyecto).
 - Tests: `npm test` corre el round-trip del codec y el del estado (`tests/estado.test.mjs`, que prueba que exportar → importar → migrar no pierda nada). El del codec estuvo roto y se arregló el 15 ago 2026.

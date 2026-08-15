@@ -2,9 +2,11 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Check, X, GripVertical, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home } from 'lucide-react';
 import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encodeCamisetaToJSON, decodeJSONToCamiseta } from './codec/index.js';
-import { elegirEco, silenciarEco, citaVigente } from './ecos/index.js';
+import { elegirEco, silenciarEco, citaVigente, paraQueDia, yaEscogio, calcularSeñales, ultimaSesion } from './ecos/index.js';
 import { TEXTOS } from './ecos/textos.js';
 import { construirICS, entregarCita, proximaCita, DURACION, aInputLocal, deInputLocal } from './cita.js';
+import { mirar, preguntaDificil } from './observador/index.js';
+import { TEXTOS_OBSERVADOR } from './observador/textos.js';
 
 import {
   STATE_KEY,
@@ -24,6 +26,7 @@ import {
   saveState,
   pushEvento,
   aplicarMovida,
+  enJuego,
   uid,
   nowISO,
 } from './estado.js';
@@ -156,16 +159,6 @@ function estadoDeMision(m) {
   }
   return m.estado;
 }
-// Una misión está "en juego" si vive en los buckets activos (CamisetaDetail,
-// SesionDiaria, cuenta de la card en CamisetasView). Las recurrentes nunca
-// desaparecen del bucket activo al completarse: siguen visibles ahí, sólo
-// que con el visual de "hecha hoy" (check + tachado), porque hacer una
-// recurrente no significa que dejó de existir — significa que ya tocó hoy.
-function enJuego(m) {
-  if (m.estado === 'archivada') return false;
-  if (m.forma === 'recurrente') return true;
-  return m.estado === 'activa';
-}
 function completionsEsteMes(m) {
   const l = Date.now() - 30 * DAY;
   return m.completions.filter(c => new Date(c).getTime() > l).length;
@@ -267,7 +260,7 @@ export default function App() {
 
   const addCamiseta = (data) => update(s => {
     const id = uid();
-    s.camisetas.push({ id, ...data, creador_id: s.user_id, origen: 'propia', origen_camiseta_id: null, precio: null, created_at: nowISO(), archived_at: null, ubicacion: PUESTA(), misiones: [], milestones: [] });
+    s.camisetas.push({ id, ...data, creador_id: s.user_id, origen: 'propia', origen_camiseta_id: null, precio: null, created_at: nowISO(), ubicacion: PUESTA(), misiones: [], milestones: [] });
     pushEv(s, { tipo: 'camiseta_creada', cam_id: id, nombre: data.nombre, emoji: data.emoji, esencia: data.esencia ?? '', arco: data.arco ?? null });
   });
   const recibirCamiseta = (molde) => {
@@ -291,7 +284,6 @@ export default function App() {
         origen_camiseta_id: molde.id || null,
         precio: null,
         created_at: nowISO(),
-        archived_at: null,
         ubicacion: PUESTA(),
         misiones: (molde.misiones || []).map(m => ({
           id: uid(),
@@ -334,7 +326,7 @@ export default function App() {
         id: camId,
         nombre: cat.nombre, emoji: cat.emoji, esencia: cat.esencia, arco: cat.arco,
         creador_id: cat.creador_id, origen: 'comprada', origen_camiseta_id: cat.id, precio: cat.precio,
-        created_at: nowISO(), archived_at: null, ubicacion: PUESTA(),
+        created_at: nowISO(), ubicacion: PUESTA(),
         misiones: [], milestones: [],
       };
       cat.misiones.forEach(m => {
@@ -625,6 +617,11 @@ export default function App() {
 
   if (!state) return <Loading />;
   const camsActivas = state.camisetas.filter(estaPuesta);
+  // Lo que el costurero le muestra a uno para que escoja informado, sin
+  // forzar. Las dos señales hablan de la camiseta, nunca del usuario: "no
+  // tiene nada que hacer" y "hace rato no se juega" describen una identidad,
+  // que es lo único que el app tiene permitido notar en voz alta.
+  const señalesCosturero = calcularSeñales(state);
   const puntosUser = puntosTotales(state.movimientos);
 
   // Instructivo de instalación: lo primero que ve un usuario nuevo.
@@ -727,8 +724,27 @@ export default function App() {
       <TabBar tab="camisetas" setTab={(t) => { setOpenCam(null); setTab(t); }} />
     </Frame>;
   }
-  if (sesion === 'diaria') return <Frame><SesionDiaria cams={camsActivas} onToggle={toggleMision} onArchive={archiveMision}
-    onClose={(n) => { if (n) logSesion({ tipo: 'diaria', notas: n }); setSesion(null); }} /></Frame>;
+  // Cerrar el ritual diario mueve la ropa y deja la sesión, en ese orden y en
+  // el mismo gesto. La sesión guarda qué se escogió y para qué día: es el
+  // material con el que después el observador puede preguntar por lo que
+  // nunca sale del clóset, sin que nadie haya tenido que reportar nada.
+  //
+  // No lleva cita: al hacedor lo convoca el trabajo. Y salir por la X llega
+  // aquí con p en null — no se mueve nada y no se registra nada.
+  const cerrarRitualDiario = (p) => {
+    setSesion(null);
+    if (!p) return;
+    update(s => {
+      p.quitadas.forEach(({ id }) => aplicarMovida(s, id, AL_SIN_DOBLAR()));
+      p.puestas.forEach(({ id }) => aplicarMovida(s, id, PUESTA()));
+    });
+    logSesion({ tipo: 'diaria', para: p.para, quitadas: p.quitadas, puestas: p.puestas, notas: p.notas });
+  };
+
+  // El ritual diario recibe el clóset entero, no solo lo puesto: el segundo
+  // paso escoge justamente de lo que no está puesto.
+  if (sesion === 'diaria') return <Frame><EscogerLaRopa cams={state.camisetas}
+    onClose={cerrarRitualDiario} /></Frame>;
   // Cerrar un check-in largo o mensual desemboca en la cita del siguiente.
   // Salirse por la X no: abandonar no es cerrar, y hasta ahora la X dejaba
   // una sesión registrada con notas vacías —lo que además le habría tapado
@@ -740,13 +756,25 @@ export default function App() {
     logSesion({ tipo, ...datos });
     if (completa) setPedirCita({ cadencia: tipo, origen: 'cierre' });
   };
-  if (sesion === 'semanal') return <Frame><SesionSemanal cams={camsActivas}
+  // El costurero ve el clóset entero, no lo que traigo puesto hoy. Desde v10
+  // "puesta" es la atención de un día: si recibiera camsActivas, solo se
+  // podría coser lo que uno se puso esta mañana, que es justo al revés de
+  // para qué sirve el ritual.
+  if (sesion === 'semanal') return <Frame><SesionCosturero cams={state.camisetas}
+    señales={señalesCosturero}
     onArchiveMision={archiveMision} onEditMision={editMision} onAddMision={addMision}
     onAjustarDificultad={ajustarDif} onCambiarForma={cambiarForma}
+    onToggleMilestone={toggleMilestone}
     onClose={cerrarSesion('semanal')} /></Frame>;
-  if (sesion === 'mensual') return <Frame><SesionMensual cams={state.camisetas}
-    onArchiveCam={archiveCamiseta} onReviveCam={reviveCamiseta} onDonateCam={donarCamiseta}
-    onCreateCam={() => { setSesion(null); setShowCreate(true); }}
+  // El observador recibe el estado entero porque sus comprobaciones miran la
+  // historia, no solo el clóset de hoy: cómo murieron las identidades que se
+  // fueron, cuánto valía una misión hace dos meses.
+  //
+  // `ultimaClave` es la comprobación de la sesión pasada: la que ganó
+  // entonces pierde fuerza ahora, para que esto no sea la misma conversación
+  // cada treinta días.
+  if (sesion === 'mensual') return <Frame><SesionObservador state={state}
+    ultimaClave={ultimaSesion(state, 'mensual')?.hallazgo ?? null}
     onClose={cerrarSesion('mensual')} /></Frame>;
 
   // El eco se calcula una vez por estado y se muestra donde el usuario
@@ -2933,10 +2961,16 @@ function AddMilestone({ onSave, onCancel }) {
 
 function DiarioView({ state, onStart, onAgendar }) {
   const ult = (tipo) => state.sesiones.filter(s => s.tipo === tipo).slice(-1)[0];
+  // La puerta al ritual diario está siempre abierta —nada de "vuelve después
+  // de las 6"—; lo único que cambia con la hora es a qué día apunta. Si ya se
+  // escogió la de ese día, la tarjeta lo dice y no lo vuelve a pedir.
+  const { dia: diaObjetivo, cuando } = paraQueDia();
+  const cuandoTxt = cuando === 'hoy' ? 'hoy' : 'mañana';
+  const ropaLista = yaEscogio(state, diaObjetivo);
   const fmt = (iso) => iso ? new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) : '—';
   const cards = [
-    { tipo: 'diaria',  titulo: 'Cierre del día',           cita: 'Lo que se hizo, lo que se nombra.',         ayuda: 'Marca qué misiones cumpliste hoy.',                                          tiempo: '1–2 min',   last: ult('diaria') },
-    { tipo: 'semanal', titulo: 'Cierre de semana',         cita: 'Las misiones se podan. Otras nacen.',       ayuda: 'Ajusta la dificultad de tus misiones, archiva las que ya no van y añade nuevas.', tiempo: '5–10 min',  last: ult('semanal') },
+    { tipo: 'diaria',  titulo: `Escoger la ropa de ${cuandoTxt}`, cita: 'Un día cabe en dos o tres camisetas.', ayuda: 'Quítate lo que no vas a jugar y deja puesto lo que sí.',                       tiempo: '1–2 min',   last: ult('diaria') },
+    { tipo: 'semanal', titulo: 'El costurero',             cita: 'Las misiones se podan. Otras nacen.',       ayuda: 'Ajusta la dificultad de tus misiones, archiva las que ya no van y añade nuevas.', tiempo: '5–10 min',  last: ult('semanal') },
     { tipo: 'mensual', titulo: 'El observador del observador', cita: 'No las misiones: el juego mismo.',     ayuda: 'Observa cómo te observas: qué vale la pena medir y cómo lo estás midiendo.',  tiempo: '15–25 min', last: ult('mensual') },
   ];
   return (<div className="fade-up">
@@ -2945,8 +2979,9 @@ function DiarioView({ state, onStart, onAgendar }) {
     <div className="space-y-3 mb-10">
       {cards.map(c => {
         // El diario solo agenda lo que se agenda: la semana y el mes. El
-        // cierre del día no tiene cita porque el hacedor vuelve por trabajo,
-        // no por alarma, y un evento diario se vuelve ruido en cuatro días.
+        // ritual diario no tiene cita porque al hacedor lo convoca el
+        // trabajo, no una alarma, y un evento diario se vuelve ruido en
+        // cuatro días.
         const agendable = c.tipo !== 'diaria';
         const cita = agendable ? citaVigente(state, c.tipo) : null;
         return (
@@ -2960,7 +2995,11 @@ function DiarioView({ state, onStart, onAgendar }) {
             <p className="ff-serif text-sm" style={{ color: 'var(--ink-soft)' }}>{c.ayuda}</p>
           </button>
           <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
-            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>última · {fmt(c.last?.date)}</span>
+            <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>
+              {c.tipo === 'diaria' && ropaLista
+                ? `la ropa de ${cuandoTxt} ya está escogida`
+                : `última · ${fmt(c.last?.date)}`}
+            </span>
             {agendable && (cita ? (
               <button onClick={() => onAgendar(c.tipo)} className="ring-ink ff-mono text-xs"
                 style={{ color: 'var(--ocean)' }}>
@@ -3307,12 +3346,20 @@ function EventoItem({ e, cam, lookupCam }) {
     case 'milestone_editado':
       glyph = '~'; color = 'var(--ink-faint)';
       text = <>milestone editado · <em>{e.nombre}</em></>; break;
-    case 'sesion_diaria':
+    case 'sesion_diaria': {
+      // Las entradas viejas no traen ropa escogida: son de cuando el ritual
+      // diario era otra cosa. Se leen como lo que fueron, sin inventarles
+      // nada — igual que pasó al jubilar la palabra "mazo".
       glyph = '☾'; color = 'var(--ocean)';
-      text = <strong>cierre del día</strong>; break;
+      const q = (e.quitadas || []).length, pz = (e.puestas || []).length;
+      text = (q || pz || e.para)
+        ? <>ropa escogida{pz > 0 && <> · se puso <strong>{e.puestas.map(c => c.nombre).join(', ')}</strong></>}{q > 0 && <> · se quitó <em>{e.quitadas.map(c => c.nombre).join(', ')}</em></>}</>
+        : <strong>cierre del día</strong>;
+      break;
+    }
     case 'sesion_semanal':
       glyph = '☾'; color = 'var(--ocean)';
-      text = <strong>cierre de semana</strong>; break;
+      text = <strong>el costurero</strong>; break;
     case 'sesion_mensual':
       glyph = '☾'; color = 'var(--accent)';
       text = <strong>observador del observador</strong>; break;
@@ -3392,119 +3439,258 @@ function EventoItem({ e, cam, lookupCam }) {
   </div>);
 }
 
-function SesionDiaria({ cams, onToggle, onArchive, onClose }) {
+// ── Escoger la ropa ──────────────────────────────────────────────────────
+//
+// El ritual diario. Dos preguntas en dos pantallas, y eso no se colapsa en
+// una: son dos momentos de reflexión con universos distintos —lo que traes
+// puesto y lo que está en el clóset—. No está optimizado para la rapidez;
+// está hecho para que uno se oiga pensar.
+//
+// Lo que NO hace, y cada una tiene su razón:
+//   · No se escogen misiones. Eso es oficio del costurero, y escogerlas una
+//     por una es engorroso. Aquí solo nombres, lista plana.
+//   · No se marca nada cumplido. El app ya lo sabe; pedírselo al usuario era
+//     volverlo la base de datos de algo que el juego ya tiene.
+//   · No aparece "lavar la ropa". El botón de pánico vive en el clóset: un
+//     atajo para quitarse las diecinueve, puesto justo donde el ritual pide
+//     mirarlas una por una, es exactamente lo que sobra.
+//   · No se evalúa lo de ayer. Lo escogido es una propuesta, no un contrato.
+//
+// Nada se mueve mientras se escoge: todo se aplica al cerrar, de una sola
+// movida. Si se aplicara sobre la marcha, salir por la X dejaría el clóset
+// revuelto y sin ninguna sesión que lo explique — y abandonar no es cerrar.
+function EscogerLaRopa({ cams, onClose }) {
+  // Se congela al entrar: si alguien abre el ritual a las 17:59 y lo cierra
+  // a las 18:01, las preguntas no pueden cambiarle de día a mitad de camino.
+  const [{ dia, cuando }] = useState(() => paraQueDia());
+  const [paso, setPaso] = useState(0);
+  const [quitadas, setQuitadas] = useState([]);   // de lo puesto, lo que sale
+  const [puestas, setPuestas] = useState([]);     // del clóset, lo que entra
   const [notas, setNotas] = useState('');
-  const [confirmArchive, setConfirmArchive] = useState(null);
-  const today = new Date().toDateString();
-  const activas = cams.flatMap(c => c.misiones.filter(m => enJuego(m)).map(m => ({ ...m, cam: c })));
-  // 'ya marcadas hoy' es solo para no-recurrentes: las recurrentes hechas hoy
-  // se quedan en 'vivas' con el check tachado y no se duplican aquí.
-  const hechasHoy = cams.flatMap(c => c.misiones.filter(m => {
-    if (m.forma === 'recurrente') return false;
-    if (m.completed_at && new Date(m.completed_at).toDateString() === today) return true;
-    return false;
-  }).map(m => ({ ...m, cam: c })));
+
+  // El acto es el mismo en la mañana y en la noche; lo único que cambia es
+  // esta palabra, y con ella el día al que apunta.
+  const cuandoTxt = cuando === 'hoy' ? 'hoy' : 'mañana';
+
+  const traigoPuesto = cams.filter(estaPuesta);
+  const enElCloset = cams.filter(c => !estaPuesta(c));
+  // Una camiseta nunca aparece en los dos pasos, y sale gratis: como todavía
+  // no se ha movido nada, la que me estoy quitando sigue contando como puesta
+  // y por lo tanto no aparece en la lista del clóset.
+
+  const alternar = (lista, set, id) =>
+    set(lista.includes(id) ? lista.filter(x => x !== id) : [...lista, id]);
+
+  // Los nombres viajan junto a los ids: dentro de un año el id de una
+  // camiseta donada no resuelve, y esta sesión sigue teniendo que poder
+  // contar qué se escogió ese día.
+  const conNombre = (ids) => ids
+    .map(id => cams.find(c => c.id === id))
+    .filter(Boolean)
+    .map(c => ({ id: c.id, nombre: c.nombre }));
+
+  const cerrar = () => onClose({
+    para: dia,
+    quitadas: conNombre(quitadas),
+    puestas: conNombre(puestas),
+    notas: notas.trim(),
+  });
+
   return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
-    <div className="flex items-center justify-between mb-10">
-      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Cierre del día</span>
-      <button onClick={() => onClose(null)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={18} /></button>
+    <div className="flex items-center justify-between mb-2">
+      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>La ropa de {cuandoTxt}</span>
+      <button onClick={() => onClose(null)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Salir"><X size={18} /></button>
     </div>
-    <h1 className="display text-4xl mb-2">Lo que se hizo.</h1>
-    <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>Marca lo cumplido. Sin culpa por lo no marcado.</p>
-    {activas.length === 0 && hechasHoy.length === 0 && <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-faint)' }}>No hay misiones activas. Ve a una camiseta y siembra alguna.</p>}
-    {hechasHoy.length > 0 && (<>
-      <div className="smallcaps mb-3" style={{ color: 'var(--ink-faint)' }}>ya marcadas hoy</div>
-      <div className="space-y-1 mb-5">
-        {hechasHoy.map(m => (
-          <div key={m.id} className="ff-serif text-sm flex items-center gap-2" style={{ color: 'var(--ink-faint)' }}>
-            <Check size={12} strokeWidth={2.5} color="var(--moss)" />
-            <span style={{ textDecoration: 'line-through' }}>{m.nombre}</span>
-            <span className="ff-mono text-xs">{m.cam.emoji}</span>
-          </div>
-        ))}
-      </div>
-    </>)}
-    {activas.length > 0 && (<>
-      <div className="smallcaps mb-3" style={{ color: 'var(--ink-faint)' }}>vivas</div>
-      <div className="space-y-1 mb-8">
-        {activas.map(m => {
-          const hoy = m.forma === 'recurrente' ? completionsHoy(m) : 0;
-          const tickHoy = hoy > 0;
+    <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{paso + 1} / 2</div>
+
+    {paso === 0 && (<div className="fade-up">
+      <h1 className="display text-4xl mb-2">¿Qué camisetas no voy a vestir {cuandoTxt}?</h1>
+      <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>
+        Van al clóset. Quitárselas no es dejar de ser eso: es decir dónde no va la concentración.
+      </p>
+      {traigoPuesto.length === 0 && (
+        <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-faint)' }}>No traes ninguna puesta. Sigue.</p>
+      )}
+      <div className="mb-8">
+        {traigoPuesto.map(c => {
+          const sale = quitadas.includes(c.id);
           return (
-          <div key={m.id} className="flex items-start gap-2 py-1" style={{ borderBottom: '1px solid var(--line-soft)' }}>
-            <button onClick={() => onToggle(m.cam.id, m.id)} className="flex items-start gap-3 py-1 text-left flex-1 ring-ink">
-              <span className="w-4 h-4 mt-1.5 rounded-sm border flex items-center justify-center check-ani" style={{
-                borderColor: tickHoy ? 'var(--moss)' : 'var(--line)',
-                background: tickHoy ? 'var(--moss)' : 'transparent',
-              }}>{tickHoy && <Check size={10} strokeWidth={3} color="var(--bg)" />}</span>
-              <span className="flex-1 ff-serif">
-                <span className="text-base mr-2">{m.cam.emoji}</span>{m.nombre}
-                {hoy > 0 && (
-                  <span className="ff-mono text-xs ml-2" style={{ color: 'var(--gold)' }}>· {hoy}× hoy</span>
-                )}
-              </span>
-              <span className="ff-mono text-xs mt-1.5" style={{ color: 'var(--gold)' }}>+{puntos(m)}</span>
-            </button>
-            {confirmArchive === m.id ? (
-              <div className="flex items-center gap-1 fade-up">
-                <button onClick={() => { onArchive(m.cam.id, m.id); setConfirmArchive(null); }}
-                  className="ring-ink ff-mono text-xs py-1 px-2"
-                  style={{ background: 'var(--accent)', color: 'var(--bg)' }}>archivar</button>
-                <button onClick={() => setConfirmArchive(null)}
-                  className="ring-ink ff-mono text-xs py-1 px-2"
-                  style={{ color: 'var(--ink-faint)' }}>no</button>
-              </div>
-            ) : (
-              <button onClick={() => setConfirmArchive(m.id)}
-                className="ring-ink p-1.5 mt-0.5"
-                style={{ color: 'var(--ink-faint)' }} aria-label="Archivar misión">
-                <Trash2 size={14} strokeWidth={1.5} />
+            <div key={c.id} className="flex items-center gap-3 py-2" style={{ borderBottom: '1px solid var(--line-soft)' }}>
+              <span className="text-xl" style={{ opacity: sale ? 0.35 : 1 }}>{c.emoji}</span>
+              <span className="flex-1 ff-serif text-lg" style={{
+                color: sale ? 'var(--ink-faint)' : 'var(--ink)',
+                textDecoration: sale ? 'line-through' : 'none',
+              }}>{c.nombre}</span>
+              {/* Devolverla es parte de pensar, no corregir un error: el mismo
+                  botón la saca y la trae. */}
+              <button onClick={() => alternar(quitadas, setQuitadas, c.id)}
+                className="ring-ink ff-mono text-xs py-1 px-2"
+                style={sale
+                  ? { color: 'var(--ink-soft)', border: '1px solid var(--line)' }
+                  : { color: 'var(--ink-faint)', border: '1px solid var(--line-soft)' }}
+                aria-label={sale ? `Volver a ponerse ${c.nombre}` : `Quitarse ${c.nombre}`}>
+                {sale ? 'devolver' : <X size={14} />}
               </button>
-            )}
-          </div>
-        );})}
+            </div>
+          );
+        })}
       </div>
-    </>)}
-    <div className="hr-deco mb-6" />
-    <label className="smallcaps block mb-3" style={{ color: 'var(--ink-faint)' }}>¿Qué movió el día?</label>
-    <textarea value={notas} onChange={e => setNotas(e.target.value)} rows={3} placeholder="Una línea. La que importe." className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
-    <div className="flex justify-end gap-3 mt-8">
-      <button onClick={() => onClose(null)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>salir</button>
-      <button onClick={() => onClose(notas.trim() || '·')} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>cerrar el día</button>
-    </div>
+      <div className="flex justify-end">
+        <button onClick={() => setPaso(1)} className="ff-serif px-5 py-2 ring-ink" style={{ border: '1px solid var(--ink)' }}>siguiente →</button>
+      </div>
+    </div>)}
+
+    {paso === 1 && (<div className="fade-up">
+      <h1 className="display text-4xl mb-2">¿Cuáles voy a vestir {cuandoTxt}?</h1>
+      <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>
+        Que {cuandoTxt} sea un gran día. Escoge a qué camisetas les vas a enfocar tu atención.
+      </p>
+      {enElCloset.length === 0 && (
+        <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-faint)' }}>El clóset está vacío.</p>
+      )}
+      <div className="mb-8">
+        {enElCloset.map(c => {
+          const entra = puestas.includes(c.id);
+          return (
+            <button key={c.id} onClick={() => alternar(puestas, setPuestas, c.id)}
+              className="flex items-center gap-3 py-2 w-full text-left ring-ink"
+              style={{ borderBottom: '1px solid var(--line-soft)' }}>
+              <span className="w-4 h-4 rounded-sm border flex items-center justify-center check-ani" style={{
+                borderColor: entra ? 'var(--moss)' : 'var(--line)',
+                background: entra ? 'var(--moss)' : 'transparent',
+              }}>{entra && <Check size={10} strokeWidth={3} color="var(--bg)" />}</span>
+              <span className="text-xl">{c.emoji}</span>
+              <span className="flex-1 ff-serif text-lg" style={{ color: entra ? 'var(--ink)' : 'var(--ink-soft)' }}>{c.nombre}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="hr-deco mb-6" />
+      {/* La reflexión del diario: contestable en un respiro y sin respuesta
+          equivocada. No es un quiz y no exige que haya pasado nada. */}
+      <label className="smallcaps block mb-3" style={{ color: 'var(--ink-faint)' }}>¿Qué movió el día?</label>
+      <textarea value={notas} onChange={e => setNotas(e.target.value)} rows={3} placeholder="Una línea. La que importe." className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+
+      <div className="flex justify-between mt-8">
+        <button onClick={() => setPaso(0)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
+        <button onClick={cerrar} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>
+          {puestas.length > 0 ? 'ponérmelas' : 'dejar lista la ropa'}
+        </button>
+      </div>
+    </div>)}
   </div>);
 }
 
-function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAjustarDificultad, onCambiarForma, onClose }) {
-  const [step, setStep] = useState(0);
+// ── El costurero ─────────────────────────────────────────────────────────
+//
+// El ritual semanal. Aquí se escribe el juego: misiones nuevas, dificultad
+// arriba y abajo, lo que ya cumplió su ciclo. Su producto no es una
+// reflexión — es que el hacedor de la semana entrante encuentre trabajo
+// listo.
+//
+// La línea con el ritual diario: **el diario escoge, el costurero escribe.**
+// El diario saca de lo que ya existe; el costurero decide qué debería
+// existir. Si el diario empezara a crear, el costurero se quedaría sin
+// oficio y el diario dejaría de ser corto.
+//
+// Antes esto era un carrusel: N pasos, uno por camiseta, en el orden en que
+// estuvieran. Con veinte camisetas eso es un trámite, y un trámite se
+// abandona a la mitad. Ahora se entra escogiendo cuál revisar y al terminar
+// se puede revisar otra. Uno siempre escoge la camiseta viva, así que la
+// lista muestra cuáles no se tocan hace rato y cuáles se quedaron sin nada
+// que hacer — sin forzar a nadie: que escoja informado.
+function SesionCosturero({ cams, señales, onArchiveMision, onEditMision, onAddMision,
+                           onAjustarDificultad, onCambiarForma, onToggleMilestone, onClose }) {
+  const [paso, setPaso] = useState('escoger');   // escoger | revisar | cerrar
+  const [camId, setCamId] = useState(null);
+  const [revisadas, setRevisadas] = useState([]);
   const [nuevas, setNuevas] = useState({});
   const [caliente, setCaliente] = useState('');
   const [fria, setFria] = useState('');
   const [notas, setNotas] = useState('');
-  const totalSteps = cams.length + 2;
-  const finish = () => {
-    Object.entries(nuevas).forEach(([camId, lista]) => {
+
+  const cam = cams.find(c => c.id === camId) || null;
+
+  // Las misiones escritas aquí se siembran al cerrar, no al teclearlas: si se
+  // sale por la X no queda media camiseta escrita a medias.
+  const sembrar = () => {
+    Object.entries(nuevas).forEach(([id, lista]) => {
       (lista || []).forEach(m => {
-        if (m?.nombre?.trim()) onAddMision(camId, { nombre: m.nombre.trim(), forma: m.forma || 'dificil', tonos: m.tonos || [], puntos_base: m.puntos_base });
+        if (m?.nombre?.trim()) onAddMision(id, {
+          nombre: m.nombre.trim(), forma: m.forma || 'dificil',
+          tonos: m.tonos || [], puntos_base: m.puntos_base,
+        });
       });
     });
+  };
+  const terminar = () => {
+    sembrar();
     onClose({ notas: notas.trim(), caliente, fria, completa: true });
   };
+
+  const abrir = (id) => { setCamId(id); setPaso('revisar'); };
+  const volverALaLista = () => {
+    setRevisadas(revisadas.includes(camId) ? revisadas : [...revisadas, camId]);
+    setCamId(null);
+    setPaso('escoger');
+  };
+
   return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
-    <div className="flex items-center justify-between mb-2">
-      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Cierre de semana</span>
-      <button onClick={() => onClose(null)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={18} /></button>
+    <div className="flex items-center justify-between mb-8">
+      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>El costurero</span>
+      <button onClick={() => onClose(null)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Salir"><X size={18} /></button>
     </div>
-    <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{step + 1} / {totalSteps}</div>
-    {step < cams.length && (() => {
-      const cam = cams[step];
+
+    {paso === 'escoger' && (<div className="fade-up">
+      <h1 className="display text-4xl mb-2">¿Qué camiseta vas a remendar?</h1>
+      <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>
+        Una a la vez. Al terminar puedes seguir con otra.
+      </p>
+      {cams.length === 0 && (
+        <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-faint)' }}>Todavía no hay camisetas que coser.</p>
+      )}
+      <div className="mb-8">
+        {cams.map(c => {
+          const s = señales[c.id] || {};
+          const ya = revisadas.includes(c.id);
+          return (
+            <button key={c.id} onClick={() => abrir(c.id)}
+              className="flex items-center gap-3 py-3 w-full text-left ring-ink"
+              style={{ borderBottom: '1px solid var(--line-soft)' }}>
+              <span className="text-xl" style={{ opacity: ya ? 0.4 : 1 }}>{c.emoji}</span>
+              <span className="flex-1">
+                <span className="ff-serif text-lg block" style={{ color: ya ? 'var(--ink-faint)' : 'var(--ink)' }}>{c.nombre}</span>
+                {/* Las señales hablan de la camiseta, nunca del usuario. "Sin
+                    misiones" es la más útil que produce el sistema: el diario
+                    la marca, el costurero la resuelve. */}
+                {!ya && s.sinMisiones && (
+                  <span className="ff-mono text-xs" style={{ color: 'var(--accent)' }}>sin misiones que hacer</span>
+                )}
+                {!ya && !s.sinMisiones && s.dormida && (
+                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>hace rato no se juega</span>
+                )}
+                {ya && <span className="ff-mono text-xs" style={{ color: 'var(--moss)' }}>revisada</span>}
+              </span>
+              <ChevronRight size={16} style={{ color: 'var(--ink-faint)' }} />
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex justify-end">
+        <button onClick={() => setPaso('cerrar')} className="ff-serif px-5 py-2 ring-ink" style={{ border: '1px solid var(--ink)' }}>
+          {revisadas.length > 0 ? 'terminar →' : 'no coso hoy →'}
+        </button>
+      </div>
+    </div>)}
+
+    {paso === 'revisar' && cam && (() => {
       const activas = cam.misiones.filter(m => enJuego(m));
+      const pendientes = (cam.milestones || []).filter(ms => ms.estado === 'pendiente');
       const drafts = nuevas[cam.id] || [];
       const setDrafts = (lista) => setNuevas({ ...nuevas, [cam.id]: lista });
       const updateDraft = (i, patch) => setDrafts(drafts.map((d, j) => j === i ? { ...d, ...patch } : d));
-      const addDraft = () => setDrafts([...drafts, { nombre: '', forma: 'dificil', tonos: [] }]);
       const removeDraft = (i) => setDrafts(drafts.filter((_, j) => j !== i));
-      // Siempre mostramos al menos un campo en blanco para empezar.
       const visibles = drafts.length === 0 ? [{ nombre: '', forma: 'dificil', tonos: [] }] : drafts;
       const ultimaTieneNombre = visibles[visibles.length - 1]?.nombre?.trim();
       return (<div className="fade-up">
@@ -3512,7 +3698,7 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
         <h2 className="display text-3xl mb-2">{cam.nombre}</h2>
         <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Cada misión: ¿sigue viva, le subes o le bajas la dificultad, o ya cumplió su ciclo?</p>
         <div className="space-y-2 mb-6">
-          {activas.length === 0 && <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Sin misiones activas.</p>}
+          {activas.length === 0 && <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Sin misiones activas. Escríbele una abajo.</p>}
           {activas.map(m => (
             <SemanalMisionRow key={m.id} m={m}
               onArchive={() => onArchiveMision(cam.id, m.id)}
@@ -3522,6 +3708,7 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
               onForma={(f) => onCambiarForma(cam.id, m.id, f)} />
           ))}
         </div>
+
         <div className="hr-deco mb-5" />
         <label className="smallcaps block mb-3" style={{ color: 'var(--ink-faint)' }}>¿Qué nace esta semana?</label>
         {visibles.map((d, i) => (
@@ -3550,29 +3737,51 @@ function SesionSemanal({ cams, onArchiveMision, onEditMision, onAddMision, onAju
           </div>
         ))}
         {ultimaTieneNombre && (
-          <button onClick={() => { if (drafts.length === 0) setDrafts(visibles); addDraft(); }}
+          <button onClick={() => { const base = drafts.length === 0 ? visibles : drafts; setDrafts([...base, { nombre: '', forma: 'dificil', tonos: [] }]); }}
             className="ring-ink ff-mono text-xs py-1 px-3 mb-3 flex items-center gap-1"
             style={{ color: 'var(--accent)', border: '1px solid var(--accent-soft)' }}>
             <Plus size={12} /> añadir otra
           </button>
         )}
-        <NavButtons onBack={step === 0 ? null : () => setStep(step - 1)} onNext={() => setStep(step + 1)} />
+
+        {/* Los hitos van al final y plegados: chulear uno aquí es recuperar el
+            que se te pasó, no el camino principal. Completar un hito tiene su
+            propio momento —compartirlo, cobrar el regalo—, y chulear cinco de
+            corrido convierte ese momento en contabilidad. */}
+        {pendientes.length > 0 && (<details className="mt-6">
+          <summary className="smallcaps cursor-pointer" style={{ color: 'var(--ink-faint)' }}>¿se te pasó algún hito?</summary>
+          <div className="mt-3 space-y-1">
+            {pendientes.map(ms => (
+              <div key={ms.id} className="flex items-center gap-3 py-1">
+                <span className="flex-1 ff-serif text-sm" style={{ color: 'var(--ink-soft)' }}>{ms.nombre}</span>
+                <button onClick={() => onToggleMilestone(cam.id, ms.id)}
+                  className="ring-ink ff-mono text-xs px-2 py-1"
+                  style={{ color: 'var(--gold)', border: '1px solid var(--line)' }}>alcanzado</button>
+              </div>
+            ))}
+          </div>
+        </details>)}
+
+        <div className="flex justify-between mt-8">
+          <button onClick={volverALaLista} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← otra camiseta</button>
+          <button onClick={() => { volverALaLista(); }} className="ff-serif px-5 py-2 ring-ink" style={{ border: '1px solid var(--ink)' }}>listo con esta →</button>
+        </div>
       </div>);
     })()}
-    {step === cams.length && (<div className="fade-up">
+
+    {paso === 'cerrar' && (<div className="fade-up">
       <h2 className="display text-3xl mb-2">La temperatura.</h2>
       <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>¿Cuál camiseta estuvo caliente esta semana? ¿Cuál estuvo fría?</p>
       <ChipsCam label="caliente" icon={Flame} cams={cams} value={caliente} onChange={setCaliente} accent="var(--accent)" />
       <ChipsCam label="fría" icon={Snowflake} cams={cams} value={fria} onChange={setFria} accent="var(--ocean)" />
-      <NavButtons onBack={() => setStep(step - 1)} onNext={() => setStep(step + 1)} />
-    </div>)}
-    {step === cams.length + 1 && (<div className="fade-up">
-      <h2 className="display text-3xl mb-2">Una nota.</h2>
-      <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Lo que esta semana te dijo. Una frase.</p>
-      <textarea value={notas} onChange={e => setNotas(e.target.value)} rows={5} autoFocus placeholder="…" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+      <div className="hr-deco mb-5" />
+      {/* La reflexión del costurero es sobre el trabajo y su dirección, no
+          sobre cómo estuvo la semana: eso es de otra silla. */}
+      <label className="smallcaps block mb-3" style={{ color: 'var(--ink-faint)' }}>¿Hacia dónde va este trabajo?</label>
+      <textarea value={notas} onChange={e => setNotas(e.target.value)} rows={4} placeholder="…" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
       <div className="flex justify-between mt-8">
-        <button onClick={() => setStep(step - 1)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
-        <button onClick={finish} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>cerrar la semana</button>
+        <button onClick={() => setPaso('escoger')} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
+        <button onClick={terminar} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>cerrar el costurero</button>
       </div>
     </div>)}
   </div>);
@@ -3632,90 +3841,79 @@ function NavButtons({ onBack, onNext }) {
   </div>);
 }
 
-function SesionMensual({ cams, onArchiveCam, onReviveCam, onDonateCam, onCreateCam, onClose }) {
-  const [step, setStep] = useState(0);
-  const [sentir, setSentir] = useState('');
-  const [regla, setRegla] = useState('');
-  const [falta, setFalta] = useState('');
-  const [honesto, setHonesto] = useState('');   // A2: pregunta de honestidad, campo propio
-  const activas = cams.filter(estaPuesta);
-  const finish = () => onClose({
+// ── El observador del observador ─────────────────────────────────────────
+//
+// El ritual mensual. La única sesión que puede desconfiar de las otras dos:
+// no mira el trabajo, mira los instrumentos con que el jefe mide el trabajo.
+//
+// Dos pantallas y nada más:
+//   1. Un hallazgo, uno solo, convertido en pregunta. Los cálculos viven en
+//      `src/observador/`; aquí solo se muestra el que ganó.
+//   2. La pregunta difícil del mes, la que no cabe en ninguna otra silla.
+//
+// Lo que se fue de aquí, y por qué:
+//   · **Archivar y donar.** Donar ya se puede desde cualquier camiseta en
+//     cualquier momento. Un ritual mensual que solo despide no está mirando
+//     al jefe: está sacando basura. Además, el camino de acá era un
+//     `confirm()` del navegador que se saltaba el ritual de despedida.
+//   · **El tablero.** Nunca existió y no va a existir: doce gráficas
+//     convierten la introspección en navegar datos, que es la versión
+//     analítica del juego de organizar.
+function SesionObservador({ state, ultimaClave, onClose }) {
+  // Se calcula una vez al entrar. Si se recalculara en cada render, contestar
+  // la pregunta podría cambiar la pregunta.
+  const [hallazgo] = useState(() => mirar(state, { ultimaClave }));
+  const [dificil] = useState(() => preguntaDificil());
+  const [paso, setPaso] = useState(0);
+  const [respuesta, setRespuesta] = useState('');
+  const [honesto, setHonesto] = useState('');
+
+  const total = hallazgo ? 2 : 1;
+  const terminar = () => onClose({
     completa: true,
+    hallazgo: hallazgo?.clave ?? null,
+    pregunta: dificil.titulo,
     honesto: honesto.trim(),
+    // La nota que se lee en la historia junta las dos respuestas sin
+    // interpretarlas: son sus palabras, no un resumen.
     notas: [
-      sentir.trim() && `Se siente: ${sentir.trim()}`,
-      regla.trim() && `Regla a cambiar: ${regla.trim()}`,
-      falta.trim() && `Falta camiseta: ${falta.trim()}`,
-      honesto.trim() && `Honestidad: ${honesto.trim()}`,
+      hallazgo && respuesta.trim() && `${hallazgo.pregunta} → ${respuesta.trim()}`,
+      honesto.trim() && `${dificil.titulo} → ${honesto.trim()}`,
     ].filter(Boolean).join(' · '),
   });
+
   return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
     <div className="flex items-center justify-between mb-2">
-      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>El observador del observador</span>
-      <button onClick={() => onClose(null)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }}><X size={18} /></button>
+      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>{TEXTOS_OBSERVADOR.titulo}</span>
+      <button onClick={() => onClose(null)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Salir"><X size={18} /></button>
     </div>
-    <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{step + 1} / 5</div>
-    {step === 0 && (<div className="fade-up">
-      <h2 className="display text-3xl mb-2">El clóset.</h2>
-      <p className="ff-serif italic mb-2" style={{ color: 'var(--ink-soft)' }}>¿Sigue cada camiseta siendo pertinente para ti?</p>
-      <p className="ff-serif text-sm mb-6" style={{ color: 'var(--ink-soft)' }}>
-        Pertinente: que todavía tiene sentido para quien eres hoy. Si alguna ya no, puedes <strong>guardarla en el clóset</strong> (la recuperas cuando quieras) o <strong>donarla</strong> (sale de tu clóset y queda para otra persona; conservas tus puntos).
-      </p>
-      <div className="space-y-2 mb-8">
-        {activas.map(c => (
-          <div key={c.id} className="flex items-center gap-3 py-2">
-            <span className="text-2xl">{c.emoji}</span>
-            <span className="flex-1 ff-serif text-lg">{c.nombre}</span>
-            <button onClick={() => { if (confirm(`¿Guardar "${c.nombre}" en el clóset? La puedes recuperar después.`)) onArchiveCam(c.id); }} className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-soft)', border: '1px solid var(--line)' }}>al clóset</button>
-            {onDonateCam && (
-              <button onClick={() => { if (confirm(`¿Donar "${c.nombre}"? Sale de tu clóset para siempre y queda disponible para otra persona. Conservas tus puntos.`)) onDonateCam(c.id); }} className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--accent)', border: '1px solid var(--accent-soft)' }}>donar</button>
-            )}
-          </div>
-        ))}
-        {cams.filter(c => !estaPuesta(c)).length > 0 && (<details className="pt-4">
-          <summary className="smallcaps cursor-pointer" style={{ color: 'var(--ink-faint)' }}>recuperar del clóset</summary>
-          <div className="mt-2 space-y-1">
-            {cams.filter(c => !estaPuesta(c)).map(c => (
-              <div key={c.id} className="flex items-center gap-3 py-1">
-                <span>{c.emoji}</span>
-                <span className="flex-1 ff-serif text-sm" style={{ color: 'var(--ink-faint)' }}>{c.nombre}</span>
-                <button onClick={() => onReviveCam(c.id)} className="ring-ink ff-mono text-xs px-2 py-0.5" style={{ color: 'var(--ink-soft)' }}>recuperar</button>
-              </div>
-            ))}
-          </div>
-        </details>)}
+    <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{paso + 1} / {total}</div>
+
+    {paso === 0 && hallazgo && (<div className="fade-up">
+      <div className="smallcaps mb-3" style={{ color: 'var(--violeta-luz)' }}>{TEXTOS_OBSERVADOR.etiquetaHallazgo}</div>
+      <h1 className="display text-3xl mb-3">{hallazgo.pregunta}</h1>
+      <p className="ff-serif mb-8" style={{ color: 'var(--ink-soft)' }}>{hallazgo.cuerpo}</p>
+      <label className="smallcaps block mb-2" style={{ color: 'var(--ink-faint)' }}>{TEXTOS_OBSERVADOR.etiquetaRespuesta}</label>
+      <p className="ff-serif italic text-sm mb-3" style={{ color: 'var(--ink-faint)' }}>{TEXTOS_OBSERVADOR.respuestaLibre}</p>
+      <textarea value={respuesta} onChange={e => setRespuesta(e.target.value)} rows={4} autoFocus placeholder="…" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+      <div className="flex justify-end mt-8">
+        <button onClick={() => setPaso(1)} className="ff-serif px-5 py-2 ring-ink" style={{ border: '1px solid var(--ink)' }}>siguiente →</button>
       </div>
-      <NavButtons onBack={null} onNext={() => setStep(step + 1)} />
     </div>)}
-    {step === 1 && (<div className="fade-up">
-      <h2 className="display text-3xl mb-2">¿Falta alguna?</h2>
-      <p className="ff-serif italic mb-3" style={{ color: 'var(--ink-soft)' }}>Una identidad que ya estás viviendo sin nombre todavía.</p>
-      <p className="ff-serif text-sm mb-6" style={{ color: 'var(--ink-soft)' }}>
-        Mira tu vida fuera del juego: ¿hay un área que no estás observando —tu salud, una relación, el dinero, algo que quieres aprender— y que una camiseta nueva podría ayudarte a sostener?
-      </p>
-      <input value={falta} onChange={e => setFalta(e.target.value)} autoFocus placeholder="(opcional)" className="w-full ff-serif text-xl pb-2 mb-4 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
-      {falta.trim() && <button onClick={onCreateCam} className="ff-mono text-xs ring-ink py-1 px-3" style={{ color: 'var(--accent)', border: '1px solid var(--accent)' }}>construirla ahora →</button>}
-      <NavButtons onBack={() => setStep(step - 1)} onNext={() => setStep(step + 1)} />
-    </div>)}
-    {step === 2 && (<div className="fade-up">
-      <h2 className="display text-3xl mb-2">¿Cómo se siente jugar?</h2>
-      <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>No las misiones: el juego mismo. ¿Vivo, mecánico, generoso, exigente?</p>
-      <textarea value={sentir} onChange={e => setSentir(e.target.value)} autoFocus rows={4} placeholder="…" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
-      <NavButtons onBack={() => setStep(step - 1)} onNext={() => setStep(step + 1)} />
-    </div>)}
-    {step === 3 && (<div className="fade-up">
-      <h2 className="display text-3xl mb-2">Una regla a cambiar.</h2>
-      <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Del juego, o de la vida. Lo que ya no sirve como está.</p>
-      <textarea value={regla} onChange={e => setRegla(e.target.value)} autoFocus rows={4} placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
-      <NavButtons onBack={() => setStep(step - 1)} onNext={() => setStep(step + 1)} />
-    </div>)}
-    {step === 4 && (<div className="fade-up">
-      <h2 className="display text-3xl mb-2">¿Estoy siendo honesto conmigo?</h2>
-      <p className="ff-serif italic mb-6" style={{ color: 'var(--ink-soft)' }}>Sin maquillar el mes. Lo que sea verdad.</p>
-      <textarea value={honesto} onChange={e => setHonesto(e.target.value)} autoFocus rows={4} placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+
+    {(paso === 1 || !hallazgo) && (<div className="fade-up">
+      {!hallazgo && (
+        // Sin material, no se fabrica un hallazgo. Se dice y se sigue.
+        <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-faint)' }}>{TEXTOS_OBSERVADOR.sinMaterial.cuerpo}</p>
+      )}
+      <h1 className="display text-3xl mb-3">{dificil.titulo}</h1>
+      <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>{dificil.ayuda}</p>
+      <textarea value={honesto} onChange={e => setHonesto(e.target.value)} rows={5} autoFocus placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
       <div className="flex justify-between mt-8">
-        <button onClick={() => setStep(step - 1)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
-        <button onClick={finish} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>cerrar el mes</button>
+        {hallazgo
+          ? <button onClick={() => setPaso(0)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
+          : <div />}
+        <button onClick={terminar} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>{TEXTOS_OBSERVADOR.cerrar}</button>
       </div>
     </div>)}
   </div>);

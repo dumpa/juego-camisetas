@@ -26,7 +26,7 @@ globalThis.localStorage = new MemoriaLocal();
 
 const {
   migrate, emptyState, loadState, saveState,
-  STATE_KEY, BACKUP_PRE_V7_KEY, BACKUP_PRE_V8_KEY,
+  STATE_KEY, BACKUP_PRE_V7_KEY, BACKUP_PRE_V8_KEY, BACKUP_PRE_V10_KEY,
   estaPuesta, GANCHOS,
 } = await import('../src/estado.js');
 
@@ -38,22 +38,25 @@ const laVuelta = (estado) => migrate(JSON.parse(JSON.stringify(estado)));
 // nueva del ritual: si el rediseño rompe el respaldo, se rompe aquí.
 function estadoLleno() {
   return {
-    user_id: 'local', version: 9, created_at: '2026-01-01T08:00:00.000Z',
+    user_id: 'local', version: 10, created_at: '2026-01-01T08:00:00.000Z',
     camisetas: [
       { id: 'c1', nombre: 'Capitán', emoji: '🧭', esencia: 'Navegar con intención',
         arco: { de: 'Day Skipper', a: 'Yachtmaster' }, creador_id: 'local', origen: 'propia',
         origen_camiseta_id: null, precio: null,
-        created_at: '2026-01-02T08:00:00.000Z', archived_at: null,
+        created_at: '2026-01-02T08:00:00.000Z',
         ubicacion: { tipo: 'puesta' },
         misiones: [
           { id: 'm1', nombre: 'Logbook', forma: 'recurrente', tonos: ['profunda'], puntos_base: 2,
             estado: 'activa', created_at: '2026-01-02T08:00:00.000Z', completed_at: null,
             completions: ['2026-05-01T10:00:00.000Z', '2026-05-02T10:00:00.000Z'] },
+          { id: 'm2', nombre: 'Curso de radar', forma: 'dificil', tonos: ['estrategica'], puntos_base: 3,
+            estado: 'archivada', created_at: '2026-01-02T08:00:00.000Z', completed_at: null,
+            archived_at: '2026-07-01T08:00:00.000Z', completions: [] },
         ],
         milestones: [{ id: 'ms1', nombre: '300 NM', descripcion: '', regalo: 'Cena buena', estado: 'pendiente' }] },
       { id: 'c2', nombre: 'Atleta', emoji: '💪', esencia: '', arco: null, creador_id: 'local',
         origen: 'propia', origen_camiseta_id: null, precio: null,
-        created_at: '2026-02-01T08:00:00.000Z', archived_at: '2026-06-01T08:00:00.000Z',
+        created_at: '2026-02-01T08:00:00.000Z',
         ubicacion: { tipo: 'gancho', posicion: 2 }, misiones: [], milestones: [] },
     ],
     // La sesión diaria con la forma del rediseño: a qué camisetas se les
@@ -100,7 +103,7 @@ function noSePierdeNada(antes, despues, ruta = '') {
   }
 }
 
-test('un estado v9 no pierde nada al exportar → importar → migrar', () => {
+test('un estado v10 no pierde nada al exportar → importar → migrar', () => {
   const antes = estadoLleno();
   noSePierdeNada(antes, laVuelta(antes));
 });
@@ -137,7 +140,7 @@ test('un estado viejo sin clóset ni formas llega entero al otro lado', () => {
   };
   const s = laVuelta(viejo);
 
-  assert.equal(s.version, 9);
+  assert.equal(s.version, 10);
   assert.equal(s.camisetas.length, 2, 'ninguna camiseta se cae');
   assert.equal(s.sesiones[0].notas, 'una nota vieja', 'las notas viejas se conservan');
 
@@ -161,6 +164,69 @@ test('un estado viejo sin clóset ni formas llega entero al otro lado', () => {
 
   // Los puntos de lo ya completado no se inventan ni se pierden.
   assert.ok(Array.isArray(s.movimientos));
+});
+
+test('v10 borra el archived_at de la camiseta y nada más', () => {
+  // El único campo que el rediseño de los rituales quita. Se va porque
+  // aplicarMovida lo reescribía cada vez que una camiseta salía de "puesta",
+  // y "puesta" ahora cambia todos los días.
+  const antes = estadoLleno();
+  antes.version = 9;
+  antes.camisetas[0].archived_at = null;
+  antes.camisetas[1].archived_at = '2026-06-01T08:00:00.000Z';
+
+  const despues = laVuelta(antes);
+
+  for (const c of despues.camisetas) {
+    assert.ok(!('archived_at' in c), `${c.nombre} conservó archived_at`);
+  }
+  // Lo demás llega entero: se compara contra el mismo estado sin ese campo y
+  // sin el evento de frontera, que es lo único que la migración añade.
+  const esperado = JSON.parse(JSON.stringify(antes));
+  esperado.version = 10;
+  esperado.camisetas.forEach(c => { delete c.archived_at; });
+  noSePierdeNada(esperado, {
+    ...despues,
+    eventos: despues.eventos.filter(e => e.tipo !== 'frontera_puesta_diaria'),
+  });
+});
+
+test('el archived_at de una MISIÓN sobrevive a v10', () => {
+  const s = laVuelta(estadoLleno());
+  const m = s.camisetas[0].misiones.find(x => x.id === 'm2');
+  assert.equal(m.archived_at, '2026-07-01T08:00:00.000Z');
+  assert.equal(m.estado, 'archivada');
+});
+
+test('la frontera de v10 se escribe una sola vez', () => {
+  const antes = estadoLleno();
+  antes.version = 9;
+  const una = laVuelta(antes);
+  const cuantas = (s) => s.eventos.filter(e => e.tipo === 'frontera_puesta_diaria').length;
+  assert.equal(cuantas(una), 1, 'la frontera queda marcada');
+  // Recargar el app no puede volver a marcarla: sería mover la fecha en que
+  // "puesta" cambió de significado.
+  assert.equal(cuantas(laVuelta(una)), 1);
+  assert.equal(cuantas(laVuelta(laVuelta(una))), 1);
+});
+
+test('un estado ya en v10 no vuelve a cruzar la frontera', () => {
+  const s = laVuelta(estadoLleno());
+  assert.equal(s.eventos.filter(e => e.tipo === 'frontera_puesta_diaria').length, 0);
+});
+
+test('el respaldo pre-v10 se congela antes de borrar archived_at', async () => {
+  localStorage.clear();
+  const antes = estadoLleno();
+  antes.version = 9;
+  antes.camisetas[0].archived_at = '2026-06-01T08:00:00.000Z';
+  localStorage.setItem(STATE_KEY, JSON.stringify(antes));
+
+  await loadState();
+  const crudo = JSON.parse(localStorage.getItem(BACKUP_PRE_V10_KEY));
+  assert.equal(crudo.camisetas[0].archived_at, '2026-06-01T08:00:00.000Z',
+    'el respaldo guarda el campo que la migración borra');
+  assert.equal(crudo.version, 9);
 });
 
 test('los respaldos crudos pre-v7 y pre-v8 no se sobrescriben nunca', async () => {
@@ -194,7 +260,7 @@ test('guardar y volver a cargar conserva el estado', async () => {
 
 test('un estado vacío es un estado válido', () => {
   const s = laVuelta(emptyState());
-  assert.equal(s.version, 9);
+  assert.equal(s.version, 10);
   assert.ok(s.cerros.some(c => c.esDelSistema), 'siempre existe el cerro del sistema');
   assert.deepEqual(s.camisetas, []);
 });

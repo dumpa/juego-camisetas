@@ -35,15 +35,18 @@ No hay linter configurado. Los tests corren sin dependencias, solo con el runner
 - **`src/estado.js`** — la capa de estado: llaves de localStorage, `emptyState`/`loadState`/`saveState`, `migrate()` y `aplicarMovida()` (el único camino por el que una camiseta cambia de sitio). Vive fuera de `App.jsx` para que las migraciones se puedan correr desde Node; es lo que prueba `tests/estado.test.mjs`.
 - **`src/App.jsx`** (~3700 líneas) — el resto de la app: ~40 componentes y los handlers, en un solo archivo. No hay Error Boundary.
 - **`src/codec/index.js`** — codec propio para exportar una "camiseta" como imagen PNG (datos ocultos en la silueta de la camiseta, con Reed-Solomon) o JSON. Dos modos: `molde` (compartir diseño entre usuarios) y `snapshot` (sync personal entre dispositivos). Formatos legacy 0x04/0x05 se siguen leyendo para siempre; el encoder actual solo emite 0x08.
-- **`src/ecos/`** — motor de "ecos": mensajes contextuales que el app le muestra al usuario según el estado (no son notificaciones ni rachas). `index.js` tiene las fuentes (funciones puras `(state, ctx) -> eco | null`), `textos.js` los textos.
+- **`src/ecos/`** — motor de "ecos": mensajes contextuales que el app le muestra al usuario según el estado (no son notificaciones ni rachas). `index.js` tiene las fuentes (funciones puras `(state, ctx) -> eco | null`), `textos.js` los textos. También vive ahí `calcularSeñales`, lo que el costurero muestra de cada camiseta, porque obedece la misma regla: el app habla de identidades, nunca de asistencia.
+- **`src/observador/`** — las comprobaciones del ritual mensual, mismo patrón que los ecos: funciones puras que devuelven un hallazgo o null, se calculan todas y **se presenta una sola**, convertida en pregunta. Nunca un tablero. La lista de lo que puede y no puede mirar está en `docs/rituales.md` §5 y la protege `tests/observador.test.mjs`.
 - **`src/cita.js`** — genera archivos `.ics` para que el usuario agende rituales en su calendario del teléfono. Deliberadamente sin recurrencia ni seguimiento (ver comentario al inicio del archivo).
 - **`src/sw.js`** — service worker: network-first para HTML, cache-first para assets.
 
 ## Modelo de datos clave
 
-El estado (`STATE_KEY` en localStorage, `version: 9`) tiene `camisetas` (cada una con `misiones`, `milestones`, ubicación en el clóset), `sesiones`, `eventos`, `movimientos`, `visitas`, `cerros`. El "clóset" es un mueble con 5 `GANCHOS` fijos (a propósito, no configurable) + `cerros` (pilas) ilimitados; cada camiseta está en exactamente una ubicación (`puesta`, `gancho`, o `cerro`).
+El estado (`STATE_KEY` en localStorage, `version: 10`) tiene `camisetas` (cada una con `misiones`, `milestones`, ubicación en el clóset), `sesiones`, `eventos`, `movimientos`, `visitas`, `cerros`. El "clóset" es un mueble con 5 `GANCHOS` fijos (a propósito, no configurable) + `cerros` (pilas) ilimitados; cada camiseta está en exactamente una ubicación (`puesta`, `gancho`, o `cerro`).
 
-Migraciones (`migrate()` en `src/estado.js`) son acumulativas por versión — al tocar el modelo de datos, sumar un paso de migración ahí, no romper los anteriores, y sumarle un caso a `tests/estado.test.mjs` que pruebe que no se pierde nada. Antes de migrar de v7 y v8 el app congela un backup crudo en `localStorage` (`state:pre-v7`, `state:pre-v8`) — nunca sobrescribir esas keys.
+Migraciones (`migrate()` en `src/estado.js`) son acumulativas por versión — al tocar el modelo de datos, sumar un paso de migración ahí, no romper los anteriores, y sumarle un caso a `tests/estado.test.mjs` que pruebe que no se pierde nada. Antes de migrar de v7, v8 y v10 el app congela un backup crudo en `localStorage` (`state:pre-v7`, `state:pre-v8`, `state:pre-v10`) — nunca sobrescribir esas keys. Solo llevan respaldo los pasos que reescriben o borran datos existentes; los que solo añaden campos, no.
+
+Desde v10 **`puesta` significa la atención de un día**, no una identidad activa: lo escoge el ritual diario. El evento `frontera_puesta_diaria` marca cuándo cambió ese significado — cualquier cálculo que cruce esa fecha está leyendo dos cosas distintas bajo el mismo nombre. La camiseta ya no tiene `archived_at` (la misión sí).
 
 ## Archivos que no son la fuente de verdad
 
