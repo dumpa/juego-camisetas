@@ -1,8 +1,32 @@
-// Round-trip test: encode → bytes → cells → bytes → decode → check equality.
-// This exercises the non-DOM path of the codec (works in Node 22+).
+// Round-trip del codec: camiseta → frame → celdas → frame → camiseta.
+// Recorre el camino sin DOM (corre en Node 22+): todo menos el SVG y el PNG.
+//
+// Ojo al escribirlo: espeja a mano lo que hace encodeCamiseta() en
+// src/codec/index.js — máscara según la forma dominante, capacidad derivada
+// de la máscara, molde por tiers y snapshot directo. Si esa función cambia
+// de camino, este archivo hay que moverlo con ella.
 
 import { __internals } from '../src/codec/index.js';
-const { encodeMoldePayload, encodeSnapshotPayload, routeDecode, buildCellList, bytesToCells, cellsToBytes } = __internals;
+const {
+  packMoldeWithTiers, encodeSnapshotInnerV4, encodeFrame08, decodeFrame08,
+  buildMaskV4, dominantForma, bytesToCells, cellsToBytes,
+} = __internals;
+
+// La capacidad no es una constante del formato: depende de la máscara, que
+// depende de la forma dominante de las misiones y de si hay arco.
+function capacidadDe(cam) {
+  const mask = buildMaskV4(dominantForma(cam.misiones || []), !!(cam.arco?.de && cam.arco?.a));
+  return { mask, capacityBytes: Math.floor(mask.list.length / 4) };
+}
+
+// Las celdas van de a 2 bits; el frame se rellena hasta el múltiplo de 4 y se
+// recorta de vuelta, igual que al leer una imagen real.
+function porLasCeldas(frame) {
+  const cells = bytesToCells(frame);
+  const pad = Array((4 - cells.length % 4) % 4).fill(0);
+  const vuelta = cellsToBytes([...cells, ...pad]).slice(0, frame.length);
+  return { vuelta, cells, intactas: vuelta.every((v, i) => v === frame[i]) };
+}
 
 // Fixture camisetas — variety of shapes
 const fixtures = [
@@ -74,9 +98,6 @@ const fixtures = [
   },
 ];
 
-const cellList = buildCellList();
-console.log(`Cell capacity: ${cellList.length} cells = ${Math.floor(cellList.length/4)} bytes\n`);
-
 let pass = 0, fail = 0;
 
 function deepEq(a, b, path='') {
@@ -109,6 +130,7 @@ function moldeView(cam) {
     origen: cam.origen || 'propia',
     creador_id: cam.creador_id || '',
     origen_camiseta_id: cam.origen_camiseta_id || '',
+    dedicatoria: (cam.dedicatoria || '').trim(),
     misiones: cam.misiones.map(m => ({
       nombre: m.nombre,
       forma: m.forma,
@@ -126,31 +148,32 @@ function moldeView(cam) {
 for (const { name, cam } of fixtures) {
   console.log(`── ${name} ──`);
 
-  // MOLDE round-trip
-  const moldeBytes = encodeMoldePayload(cam);
-  console.log(`  MOLDE: ${moldeBytes.length}B`);
-  // cells round-trip (covers the cells path even though it's identity in JS)
-  const moldeCells = bytesToCells(moldeBytes);
-  const moldeBytesRT = cellsToBytes([...moldeCells, ...Array((4 - moldeCells.length % 4) % 4).fill(0)]).slice(0, moldeBytes.length);
-  const cellsMatch = moldeBytesRT.every((v, i) => v === moldeBytes[i]);
-  const { mode: moldeMode, camiseta: moldeDecoded } = await routeDecode(moldeBytesRT);
+  const { mask, capacityBytes } = capacidadDe(cam);
+  const warnings = [];
+
+  // MOLDE
+  const moldeFrame = await packMoldeWithTiers(cam, capacityBytes, warnings);
+  console.log(`  MOLDE: ${moldeFrame.length}B de ${capacityBytes}B`);
+  const molde = porLasCeldas(moldeFrame);
+  const { mode: moldeMode, camiseta: moldeDecoded } = await decodeFrame08(molde.vuelta);
+  delete moldeDecoded._completitud;   // lo pone el decoder, no viaja en los bytes
   const moldeOk = moldeMode === 'molde' && deepEq(moldeView(cam), moldeDecoded);
-  console.log(`  MOLDE round-trip: ${moldeOk ? '✅' : '❌'} (cells ${cellsMatch ? 'OK' : 'BAD'}, fits ${moldeCells.length}/${cellList.length} cells)`);
+  console.log(`  MOLDE round-trip: ${moldeOk ? '✅' : '❌'} (celdas ${molde.intactas ? 'OK' : 'BAD'}, cabe ${molde.cells.length}/${mask.list.length})`);
   if (moldeOk) pass++; else fail++;
 
-  // SNAPSHOT round-trip
-  const snapBytes = await encodeSnapshotPayload(cam);
-  console.log(`  SNAPSHOT: ${snapBytes.length}B (deflated)`);
-  const snapCells = bytesToCells(snapBytes);
-  const snapBytesRT = cellsToBytes([...snapCells, ...Array((4 - snapCells.length % 4) % 4).fill(0)]).slice(0, snapBytes.length);
-  const snapCellsMatch = snapBytesRT.every((v, i) => v === snapBytes[i]);
-  const { mode: snapMode, camiseta: snapDecoded } = await routeDecode(snapBytesRT);
-  // For SNAPSHOT we expect ~exact equality (minus origen_camiseta_id which snapshot doesn't include)
+  // SNAPSHOT — sin tiers: o cabe entero o no va
+  const snapFrame = await encodeFrame08(encodeSnapshotInnerV4(cam, warnings), { snapshot: true });
+  console.log(`  SNAPSHOT: ${snapFrame.length}B de ${capacityBytes}B (deflated)`);
+  const snap = porLasCeldas(snapFrame);
+  const { mode: snapMode, camiseta: snapDecoded } = await decodeFrame08(snap.vuelta);
+  delete snapDecoded._completitud;
+  // El snapshot vuelve idéntico salvo origen_camiseta_id, que solo lleva el molde.
   const expected = { ...cam };
-  delete expected.origen_camiseta_id; // snapshot doesn't carry this; molde does
+  delete expected.origen_camiseta_id;
   const snapOk = snapMode === 'snapshot' && deepEq(expected, snapDecoded);
-  console.log(`  SNAPSHOT round-trip: ${snapOk ? '✅' : '❌'} (cells ${snapCellsMatch ? 'OK' : 'BAD'}, fits ${snapCells.length}/${cellList.length} cells)`);
+  console.log(`  SNAPSHOT round-trip: ${snapOk ? '✅' : '❌'} (celdas ${snap.intactas ? 'OK' : 'BAD'}, cabe ${snap.cells.length}/${mask.list.length})`);
   if (snapOk) pass++; else fail++;
+  if (snapFrame.length > capacityBytes) { console.log('  ⚠️  el snapshot no cabría en la imagen'); }
   console.log('');
 }
 

@@ -19,6 +19,7 @@
 // toca. Al final del archivo quedan anotadas las fuentes que faltan.
 
 import { TEXTOS, variante } from './textos.js';
+import { enJuego } from '../estado.js';
 
 const DIA = 86400000;
 const dias = (ms) => ms / DIA;
@@ -60,6 +61,39 @@ export function citaVigente(state, cadencia, ahora = new Date()) {
     break; // solo importa la última: agendar de nuevo reemplaza el compromiso
   }
   return mejor;
+}
+
+// Las señales que el costurero le pone a cada camiseta para que uno escoja
+// cuál remendar. Viven aquí, con lo demás que el app se atreve a notar en voz
+// alta, porque obedecen la misma regla y es fácil romperla sin darse cuenta:
+//
+//   el app puede decir que hace rato no juegas de futbolista —eso habla de
+//   una identidad— y nunca que hace rato no entras.
+//
+// De ahí que no haya número. Ni días, ni "llevas X sin": sale la etiqueta o
+// no sale. Un contador aquí sería una racha con otro nombre.
+const DORMIDA_DIAS = 14;
+
+export function calcularSeñales(state, ahora = new Date()) {
+  const t0 = ahora.getTime();
+  const ultimoMov = {};
+  for (const mv of (state?.movimientos || [])) {
+    if (!mv.cam_id) continue;
+    const t = new Date(mv.ts).getTime();
+    if (!isNaN(t) && t > (ultimoMov[mv.cam_id] || 0)) ultimoMov[mv.cam_id] = t;
+  }
+  const señales = {};
+  for (const c of (state?.camisetas || [])) {
+    // Una camiseta recién creada no está dormida: no ha tenido cuándo
+    // jugarse, y decirle lo contrario es un reproche por existir.
+    const nacimiento = new Date(c.created_at || 0).getTime();
+    const referencia = ultimoMov[c.id] || (isNaN(nacimiento) ? t0 : nacimiento);
+    señales[c.id] = {
+      sinMisiones: !(c.misiones || []).some(enJuego),
+      dormida: dias(t0 - referencia) > DORMIDA_DIAS,
+    };
+  }
+  return señales;
 }
 
 // ── Silencio ─────────────────────────────────────────────────────────────
@@ -137,52 +171,77 @@ function fuenteAgendar(cadencia, vencimientoDias, silencioDias, rodajeDias) {
   };
 }
 
-// A partir de esta hora tiene sentido hablar de cerrar el día. Antes, el día
-// todavía se está haciendo.
-const HORA_CIERRE_DIA = 18;
+// A partir de esta hora el día ya no se está haciendo: se está entregando.
+// Antes de esa hora, escoger la ropa es escoger la de hoy; después, la de
+// mañana. El acto es el mismo y la hora solo decide a qué día apunta.
+const HORA_ENTREGA = 18;
 
-const fechaDe = (d) =>
+export const fechaDe = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-// ¿Se cerró el día de hoy?
-function cerroElDia(state, ahora) {
-  const ult = ultimaSesion(state, 'diaria');
-  if (!ult) return false;
-  const d = new Date(ult.date);
-  return !isNaN(d.getTime()) && d.toDateString() === ahora.toDateString();
+// Para qué día se está escogiendo la ropa, según cuándo se entra. Lo usan el
+// eco y el ritual: si no compartieran esta cuenta, el eco podría invitar a
+// escoger la de mañana y la pantalla preguntar por la de hoy.
+export function paraQueDia(ahora = new Date()) {
+  const esNoche = ahora.getHours() >= HORA_ENTREGA;
+  const objetivo = new Date(ahora);
+  if (esNoche) objetivo.setDate(objetivo.getDate() + 1);
+  return { dia: fechaDe(objetivo), cuando: esNoche ? 'manana' : 'hoy' };
 }
 
-// Fuente: cerrar el día.
+// ¿Ya se escogió la ropa de ese día? Una vez hecho, está hecho: si se hizo en
+// la mañana, en la noche no se vuelve a pedir.
 //
-// No mira si hay misiones marcadas, a propósito. El cierre no termina en la
-// lista: termina en "¿qué movió el día?", y esa respuesta no depende de haber
-// cumplido nada. Un día sin una sola marca puede ser el que más tenga que
-// decir. Pedir rendimiento para merecer la reflexión sería gamificación
+// Las sesiones viejas no llevan 'para' —son de cuando el ritual diario era
+// otra cosa—, así que para ellas se mira la fecha en que se escribieron. Sin
+// eso, el primer día después de actualizar el eco hablaría de más.
+export function yaEscogio(state, dia) {
+  const lista = state?.sesiones || [];
+  for (let i = lista.length - 1; i >= 0; i--) {
+    const s = lista[i];
+    if (s.tipo !== 'diaria') continue;
+    if (s.para) { if (s.para === dia) return true; continue; }
+    const d = new Date(s.date);
+    if (!isNaN(d.getTime()) && fechaDe(d) === dia) return true;
+  }
+  return false;
+}
+
+// Fuente: escoger la ropa.
+//
+// No mira si hay misiones marcadas, a propósito. El ritual no termina en la
+// lista: termina en la ropa escogida y en una línea, y eso no depende de
+// haber cumplido nada. Un día sin una sola marca puede ser el que más tenga
+// que decir. Pedir rendimiento para merecer la reflexión sería gamificación
 // disfrazada de criterio (regla 4).
 //
-// Su acción no es una cita: abre el check-in ahí mismo. Es el único eco que
+// Su acción no es una cita: abre el ritual ahí mismo. Es el único eco que
 // pide algo que se hace en el momento, y por eso es el único que no pasa por
-// el calendario.
-function fuenteCerrarDia(state, ctx) {
+// el calendario — al hacedor lo convoca el trabajo, no una alarma.
+//
+// Se asoma en dos momentos, en la mañana y al caer la tarde, con frases
+// distintas. La clave no es el día del calendario sino **el día que se está
+// escogiendo**, y de ahí sale solo lo que queremos: la invitación es una por
+// decisión, no una por vez que abras el app. Si anoche escogiste (o
+// descartaste) la ropa de mañana, hoy en la mañana no te la vuelve a pedir.
+function fuenteEscogerLaRopa(state, ctx) {
   const { ahora } = ctx;
-  if (ahora.getHours() < HORA_CIERRE_DIA) return null;
   if (!tieneRodaje(state, ahora, 0)) return null;
-  if (cerroElDia(state, ahora)) return null;
 
-  const fecha = fechaDe(ahora);
-  const t = variante(TEXTOS.cerrarDia.frases, fecha);
+  const { dia, cuando } = paraQueDia(ahora);
+  if (yaEscogio(state, dia)) return null;
+
+  const t = variante(TEXTOS.escogerLaRopa[cuando], dia);
   if (!t) return null;
 
   return {
-    // La clave lleva la fecha: descartarlo lo apaga hoy y mañana es otro eco,
-    // con otra clave. Así no hace falta un silencio de horas.
-    clave: `cerrar-dia:${fecha}`,
-    fuente: 'cerrar-dia',
+    clave: `escoger-ropa:${dia}`,
+    fuente: 'escoger-ropa',
     titulo: t.titulo,
     cuerpo: t.cuerpo,
     tono: 'var(--gold)',
-    accion: { etiqueta: TEXTOS.cerrarDia.accion, tipo: 'sesion', cadencia: 'diaria' },
-    descartar: TEXTOS.cerrarDia.descartar,
+    accion: { etiqueta: TEXTOS.escogerLaRopa.accion[cuando], tipo: 'sesion', cadencia: 'diaria' },
+    descartar: TEXTOS.escogerLaRopa.descartar,
     silencioDias: 1,
   };
 }
@@ -194,10 +253,14 @@ function fuenteCerrarDia(state, ctx) {
 //
 // Entre semana y mes: la semana primero. La cadencia corta sostiene, la
 // larga corrige, y de nada sirve corregir lo que no se sostiene.
+//
+// El de escoger la ropa va de último aunque sea el que más habla: es el que
+// vuelve todos los días, y si fuera primero taparía a los otros dos cada vez
+// que les tocara turno.
 export const FUENTES = [
   fuenteAgendar('semanal', 7, 7, 7),
   fuenteAgendar('mensual', 28, 21, 21),
-  fuenteCerrarDia,
+  fuenteEscogerLaRopa,
 
   // Pendientes para la próxima sesión (pieza 3 del plan v1). Cada una es una
   // función más en este arreglo; lo difícil de todas es el criterio de
