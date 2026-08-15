@@ -1,0 +1,105 @@
+# Decisiones
+
+Lo que ya se pensó y se cerró, con su razón. **No es una lista de reglas** (eso está en `docs/brief.md`): es el registro de por qué las cosas quedaron como quedaron.
+
+Para qué sirve: casi todo lo de aquí tiene una alternativa que parece mejor a primera vista. Si vas a proponer una de esas alternativas, lee primero la razón. Reabrir una decisión es válido —varias de estas cambiaron— pero con argumento nuevo, no por no haberla visto.
+
+Las fechas son de cuando se cerró la decisión.
+
+---
+
+## El clóset
+
+- **5 ganchos fijos, no configurables** (25 jul 2026). El límite es parte del mueble; hacerlo configurable convierte el clóset en una preferencia.
+- **Las camisetas puestas no se limitan** (25 jul 2026). Número ilimitado a propósito: si el usuario se siente agobiado, lava la ropa. La restricción vive en el gesto de liberación, no en un tope.
+- **Cerros ilimitados con nombre**, más un cerro del sistema "sin doblar" donde cae la ropa lavada. Va de último en el orden, no de primero.
+- **Orden de la pantalla:** puestas → lavar la ropa → ganchos → cerros. Las puestas van arriba porque son las importantes.
+- **Los cerros dejan ver qué hay dentro.** Un montón opaco es un cajón donde se pierden cosas.
+- **Mover entre cerros y ganchos no escribe evento.** Solo entrar y salir de "puesta" es historia; lo demás es acomodar muebles.
+- **Gancho a gancho intercambia**; desde fuera, el gancho ocupado desaloja su camiseta al cerro sin doblar.
+- **Arrastre por agarradero con pointer events**, y tocar el agarradero abre una lista de destinos (25 jul 2026). Razón: el drag-and-drop nativo no existe en iOS.
+- **Doblar es una vista entera (`DoblarView`), no una ventana flotante** (26 jul 2026). Tiene su ruta, su scroll y su TabBar, como el detalle de camiseta. Además de leerse mejor, elimina de raíz la clase de bug de `position: fixed` descrita en `docs/brief.md`.
+- **Un solo camino para doblar:** el agarradero del clóset y el botón del detalle llevan a la misma vista.
+- **"+ cerro nuevo" crea el cerro y mueve la camiseta en una sola movida**, para no dejar cerros vacíos.
+- **Después de doblar se sale de la ficha** de la camiseta.
+
+## Lavar la ropa
+
+- **Lava todas las puestas sin excepción, sin confirmación previa y sin deshacer** (25 jul 2026). Es un botón de pánico: pedir confirmación le quita justamente lo que sirve.
+- **Deja su propio evento (`lavada`) en la historia**, con los nombres además de los ids. No se infiere de fechas de archivado.
+- **Es liberación, no mantenimiento.** Que exista no lo vuelve parte de la rutina.
+- **No hay botón de "doblar la ropa" en bloque** (26 jul 2026). Lavar no tiene decisiones; doblar son puras decisiones. Un doblado masivo sería un modo de clasificar — el juego de organizar que este app tiene que evitar. Si algún día se hace, va dentro del ritual mensual, donde revisar ya es lo que se está haciendo.
+
+## Donar
+
+- **El ritual de despedida no se toca.** Es lo que hace que archivar una identidad no sea borrar un registro.
+- **En la donación masiva se quita la opción de enviarle la ropa a alguien** (25 jul 2026), porque pueden ser demasiadas.
+- **Donar un cerro sí lleva ritual, pero sin envío:** el cerro simplemente desaparece.
+- **El observador no es donde se dona** (15 ago 2026). Donar ya se puede desde cualquier camiseta; un ritual mensual que solo despide no está mirando al jefe, está sacando basura.
+
+## La cita
+
+- **Solo se agendan el ritual semanal y el mensual** (14 jul 2026). El diario no: al hacedor lo convoca el trabajo, y un evento diario se vuelve ruido que se aprende a ignorar.
+- **Evento único, sin recurrencia, reagendado al cerrar cada ritual.** Es un compromiso, no una configuración.
+- **El app no rastrea si la cita se cumplió.** Faltar no produce nada.
+- **El nombre del evento es libre y nunca sale del dispositivo.** Por eso no hay link de Google Calendar: pondría el nombre en una URL.
+- **`.ics` generado en el cliente con `VALARM` a −10 min.** Duración 15 min (semanal) y 30 min (mensual); la fecha propuesta es la misma hora del día redondeada al cuarto.
+- **En iOS se sirve por el service worker** (26 jul 2026). Probado en iPhone: funciona, con dos toques de diálogos del sistema que no se pueden quitar desde el app. Ver la restricción completa en `docs/brief.md` — no "simplificar" a una descarga.
+
+## Los ecos
+
+- **Un eco a la vez.** Es regla del sistema, no un límite técnico por resolver.
+- **Vive arriba de la pantalla Hoy**, no en el Diario (26 jul 2026).
+- **Sin encabezado que nombre la voz**, mientras el vocabulario de roles siga sin decidirse.
+- **Una cita futura apaga el eco de agendar; una cita vencida lo devuelve.**
+- **Descartar silencia por cadencia, no globalmente:** 7 días el semanal, 21 el mensual. Vencimientos de 7 y 28 días.
+- **Rodaje mínimo antes de hablar:** 7 y 21 días de vida del app, y al menos una camiseta puesta. Un app recién instalado no tiene nada que devolver.
+- **Orden de las fuentes: de lo raro a lo frecuente** (agendar mensual antes que cerrar el día).
+- **El eco del día no exige que haya misiones cumplidas** (corrección del 26 jul 2026). La reflexión del cierre es lo importante, y un día sin nada marcado puede ser el que más tenga que decir. La condición existió y estaba mal.
+- **El eco del día también aparece en la mañana** (15 ago 2026), pero habla una sola vez al día: si ya invitó, o si el ritual ya se hizo, se calla. La clave lleva la fecha para que descartarlo apague solo ese día.
+- **Abandonar por la X no cuenta como cerrar** (26 jul 2026) y por lo tanto no le tapa la boca al eco.
+
+## Los rituales
+
+Detalle completo en `docs/rituales.md`. Aquí solo lo que se cerró y cuándo.
+
+- **Se jubila la palabra "check-in"** (15 ago 2026). Cada ritual se llama por lo que se hace en él.
+- **El ritual diario escoge camisetas, no misiones** (15 ago 2026). Escoger misiones es engorroso y además le quitaría el oficio al taller. El diario escoge; el taller escribe.
+- **La escogencia va en dos pasos** —quién no voy a ser, quién voy a ser— **y eso no se colapsa en uno** (15 ago 2026). Son dos momentos de reflexión con universos distintos. El ritual no está optimizado para la rapidez.
+- **Al día siguiente no se evalúa lo que se escogió.** Es una propuesta, no un contrato.
+- **Qué datos puede mirar el observador** (15 ago 2026): tono de las misiones, duración activa antes de archivar, gastada vs. abandonada, tasa de creación vs. juego, deriva del promedio de puntos. **Qué no:** rachas, días activos, curvas de actividad. Y se presenta una sola comprobación por sesión, convertida en pregunta — nunca un tablero.
+
+## Datos, codec y privacidad
+
+- **Los mensajes personales no viajan en el codec** (14 jul 2026). Se escriben por WhatsApp, aparte. Compartir una camiseta no debe cargarle a nadie un rol que no pidió.
+- **El app no sabe quién es el mentor de nadie.** El usuario elige el destinatario en WhatsApp: cada uno sabe.
+- **El codec exporta por lista blanca**, campo por campo. Un campo nuevo no se filtra solo.
+- **Los formatos legacy se leen para siempre.**
+- **Las migraciones son acumulativas** y los respaldos crudos `state:pre-v7` / `state:pre-v8` nunca se sobrescriben.
+- **Todas las aperturas del app se registran en `visitas[]`** (14 jul 2026), no una por día: el patrón de hora del día es lo que alimenta la distinción jefe/hacedor.
+
+## Estética y vocabulario
+
+- **Paleta y tipografías derivadas del codec** (25 jul 2026). La estética anterior —crema y serif— se descartó explícitamente por genérica.
+- **"Mazo" jubilado en toda la app**: es el clóset, y "al mazo" es "ponérmela" (26 jul 2026). Cambió también cómo se leen entradas viejas del Diario, y se aceptó ese costo.
+- **Se escribe "clóset", con tilde.**
+
+## Documentación y método
+
+- **Se versiona el brief (doctrina), no el plan** (25 jul 2026). El plan es una tabla de despacho.
+- **La doctrina vive en el repo; el plan y la historia, en Notion** (15 ago 2026). Razón: lo que un agente debe obedecer tiene que cargarse solo y viajar en el mismo commit que el código; lo que lee el autor puede quedarse donde se lee desde el teléfono.
+- **Los temas se nombran, no se numeran.**
+
+---
+
+## Abiertas
+
+No decidido. No resolverlas por cuenta propia.
+
+- **"Puesta" pasa a ser una variable diaria** con el rediseño del ritual diario, así que la camiseta abandonada hay que calcularla desde el historial de elecciones y no desde el estado. Pendiente, no bloquea.
+- **Dos caminos para donar una camiseta suelta:** el ritual completo desde el detalle, y un `confirm()` del navegador desde la sesión mensual que se lo salta. Hay que unificarlos.
+- **El criterio de selección del eco:** qué fragmento propio merece volver.
+- **El nombre del ritual semanal:** "el taller de costura" o solo "el taller".
+- **Dónde vive el doblado en bloque**, si se hace: dentro del observador es el argumento actual.
+- **El regalo de un milestone:** lo pone quien envía la camiseta, o es un autorregalo.
+- **Niveles y camisetas emergentes** (ver `docs/vision.md`): ideas del documento original que no están en el código y no se sabe si se descartaron.
