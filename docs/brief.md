@@ -29,6 +29,23 @@ Debajo hay una tesis de dos personajes que hay que entender para no romper nada:
 
 Son la misma persona en tres momentos. Casi toda la doctrina de abajo se deduce de ahí. Detalle completo en `docs/rituales.md`.
 
+## La camiseta no es la identidad
+
+Distinción de fondo, y la que más fácil se rompe al implementar. **La camiseta es una herramienta para acercarse a una identidad, no la identidad misma.** Las identidades ya están ahí, se remiendan, y pasan por momentos más activos y menos activos. Ponerse una camiseta significa que hoy esa identidad tiene atención — que hoy se juega con esa actitud. Quitársela **no** es dejar de ser eso: es decir que hoy la concentración va en otra parte.
+
+De ahí salen tres estados y una sola puerta de salida:
+
+- **Puesta** — hoy tiene atención.
+- **En el clóset** (gancho o cerro) — la identidad está en la vida de la persona, hoy sin atención.
+- **Donada o archivada** — la identidad se fue. Es la única salida real, y por eso es la única con ritual de despedida.
+
+Lo que se sigue de esto:
+
+- Quitarse una camiseta es un gesto barato y sin duelo. Nada en la UI puede hacer que se sienta como renunciar — si se siente así, la gente deja de quitárselas y termina cargando el clóset encima.
+- Por eso "puesta" puede cambiar a diario sin que se pierda nada, y por eso lavar la ropa no es violento: limpia atención, no identidades.
+- Una camiseta abandonada no es la que te quitaste: **es la que conservas y a la que nunca le das atención.**
+- Ninguna palabra de la UI equipara la camiseta con el ser. Nada de "deja de ser", "quién eres" ni "ya no eres". Se habla de atención, de juego, de a qué se le pone el foco hoy.
+
 ## Las reglas duras
 
 **Nada de rachas.** Ni contadores de días seguidos, ni "llevas X días sin", ni porcentajes de cumplimiento, ni nada que mida asistencia. Es la regla que más veces va a parecer razonable romper.

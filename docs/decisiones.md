@@ -8,6 +8,11 @@ Las fechas son de cuando se cerró la decisión.
 
 ---
 
+## El concepto
+
+- **La camiseta no es la identidad** (15 ago 2026). Es una herramienta para acercarse a ella: ponérsela significa que hoy esa identidad tiene atención, quitársela significa que hoy no es ahí donde va la concentración. Esta distinción es la que resuelve que "puesta" pueda ser una variable diaria sin que eso sea renunciar a nada, y la que define la única salida real de una identidad: donar o archivar. Texto completo en `docs/brief.md`.
+- **Evidencia que la motivó:** el autor llegó a tener 19 camisetas puestas al tiempo. No eran 19 identidades en juego — era que quitárselas se sentía como renunciar, así que no se las quitaba.
+
 ## El clóset
 
 - **5 ganchos fijos, no configurables** (25 jul 2026). El límite es parte del mueble; hacerlo configurable convierte el clóset en una preferencia.
@@ -76,6 +81,7 @@ Detalle completo en `docs/rituales.md`. Aquí solo lo que se cerró y cuándo.
 - **El codec exporta por lista blanca**, campo por campo. Un campo nuevo no se filtra solo.
 - **Los formatos legacy se leen para siempre.**
 - **Las migraciones son acumulativas** y los respaldos crudos `state:pre-v7` / `state:pre-v8` nunca se sobrescriben.
+- **El significado de `puesta` cambia con el rediseño del ritual diario.** Antes: identidad activa, duraba meses. Después: atención de un día. **Fecha del despliegue de esa migración: ______** — anotarla aquí el día que se despliegue, porque cualquier cálculo que cruce esa frontera lee dos cosas distintas bajo el mismo nombre. No afecta la duración de una identidad, que se mide de creación a archivo.
 - **Todas las aperturas del app se registran en `visitas[]`** (14 jul 2026), no una por día: el patrón de hora del día es lo que alimenta la distinción jefe/hacedor.
 
 ## Estética y vocabulario
@@ -96,7 +102,8 @@ Detalle completo en `docs/rituales.md`. Aquí solo lo que se cerró y cuándo.
 
 No decidido. No resolverlas por cuenta propia.
 
-- **"Puesta" pasa a ser una variable diaria** con el rediseño del ritual diario, así que la camiseta abandonada hay que calcularla desde el historial de elecciones y no desde el estado. Pendiente, no bloquea.
+- **Cómo se calcula la camiseta abandonada** ahora que "puesta" es atención diaria: es la que se conserva en el clóset y nunca se escoge. Falta definir el umbral, y que no se lea como un reproche al usuario. No bloquea.
+- **La redacción de las dos preguntas del ritual diario.** "Quién no voy a ser mañana" contradice la distinción entre camiseta e identidad. La alternativa sobre la mesa es la alineación del día —quién juega y quién descansa—, pero "banquillo" ya está reservado en el vocabulario de la capa social.
 - **Dos caminos para donar una camiseta suelta:** el ritual completo desde el detalle, y un `confirm()` del navegador desde la sesión mensual que se lo salta. Hay que unificarlos.
 - **El criterio de selección del eco:** qué fragmento propio merece volver.
 - **El nombre del ritual semanal:** "el taller de costura" o solo "el taller".
