@@ -1,8 +1,9 @@
-cambios para camisetas
+poder escoger varias camisetas como calientes y varias como frias.
 
-¿Cuáles voy a vestir mañana?
-Un día cabe en dos o tres. Lo que escojas es lo que vas a encontrar abierto.
-esta frase está un poco criptica. 
+¿HACIA DÓNDE VA ESTE TRABAJO?
+es una pregunta que no es clara, porque no sabemos a cual trabajo se refiere, tengo muchas identidades y muchas camisetas. es dificil de responder.
 
-tal vez mejor un:
-que mañana sea un gran idea. escoje a que camisetas les vas a enfocar tu atención.
+observador del observador está muy corto.
+
+
+las camisetas que tengo puestas son dificiles de ordenar, no funciona bien 
