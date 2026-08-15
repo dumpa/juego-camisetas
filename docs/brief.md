@@ -12,7 +12,8 @@ Es la traducción al repo del brief permanente que vivía en Notion ("🤖 Para 
 | `docs/brief.md` | **Esto.** Las reglas duras, el vocabulario, las restricciones que no se simplifican | Antes de tocar rituales, ecos, textos o cualquier cosa que le hable al usuario |
 | `docs/decisiones.md` | Lo ya decidido y por qué, con fecha | Antes de proponer cambiar un comportamiento existente |
 | `docs/vision.md` | Por qué el modelo de datos es como es, de dónde viene la idea | Antes de tocar el modelo de puntuación, `forma`/`tonos`, milestones o el catálogo |
-| `docs/rituales.md` | Qué pretende cada uno de los tres rituales y por qué | Antes de tocar los cierres diario, semanal o mensual |
+| `docs/rituales.md` | Qué pretende cada uno de los tres rituales y por qué | Antes de tocar los rituales diario, semanal o mensual |
+| `docs/rituales-construido.md` | Cómo quedaron construidos: dónde vive cada pieza, qué forma tiene el dato, las trampas | Antes de tocar el código de un ritual |
 | `docs/partner-checkins.md` | Plan de una función **no construida** | Solo si se va a construir el partner |
 
 Si dos documentos se contradicen, gana el más específico (`rituales.md` sobre los rituales, `vision.md` sobre el modelo) y se avisa de la contradicción para arreglarla.

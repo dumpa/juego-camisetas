@@ -11,7 +11,8 @@ PWA "El juego de las camisetas" (v0.5) — sistema de productividad personal gam
 Este archivo dice cómo está hecho el repo. **Por qué está hecho así vive en `docs/`, y hay que leerlo antes de tocar producto:**
 
 - **`docs/brief.md`** — las reglas duras (nada de rachas, el app no cuenta ausencias, nada sale del dispositivo), el vocabulario y las restricciones técnicas que parecen simplificables y no lo son. Leerlo antes de tocar ecos, cierres, textos o cualquier cosa que le hable al usuario.
-- **`docs/rituales.md`** — qué pretende cada uno de los tres rituales (diario, semanal, mensual) y por qué. Están en rediseño: el código de hoy es la versión anterior.
+- **`docs/rituales.md`** — qué pretende cada uno de los tres rituales (diario, semanal, mensual) y por qué.
+- **`docs/rituales-construido.md`** — cómo quedaron construidos: dónde vive cada pieza, qué forma tiene el dato que produce cada ritual, y cinco trampas que parecen inocentes (la frontera de v10, `archived_at`, `camsActivas`). Leerlo antes de tocar el código de un ritual.
 - **`docs/decisiones.md`** — qué ya se pensó y se cerró, con fecha y razón. Consultarlo antes de proponer un cambio de comportamiento: casi todo lo de ahí tiene una alternativa que parece mejor a primera vista y ya fue descartada.
 - **`docs/vision.md`** — de dónde viene la idea y por qué el modelo de datos es como es.
 - **`docs/partner-checkins.md`** — plan de una función no construida.
