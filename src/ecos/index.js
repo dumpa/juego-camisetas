@@ -126,7 +126,7 @@ function tieneRodaje(state, ahora, minDias) {
 
 // Semilla de la ocasión: la frase es la misma toda la semana (o todo el mes)
 // y cambia al pasar a la siguiente. Estable, no aleatoria.
-function semanaDe(d) {
+export function semanaDe(d) {
   const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
   const dow = (t.getUTCDay() + 6) % 7;          // lunes = 0
   t.setUTCDate(t.getUTCDate() - dow + 3);        // jueves de esa semana

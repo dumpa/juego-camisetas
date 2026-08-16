@@ -51,24 +51,59 @@ export const HALLAZGOS = {
   },
 };
 
-// Las difíciles. No se calculan: se rotan, estables dentro del mismo mes.
+// Las difíciles. No se calculan y no se rotan: **salen todas**.
+//
+// El observador no es una sesión corta que se despacha de camino a otra cosa;
+// es la que se agenda para sentarse un rato. Mostrar una sola por mes y
+// esconder el resto convertía media hora reservada en tres minutos.
+//
+// Lo que las hace soportables no es que sean pocas, es que **se pueden
+// pasar**: contestar ninguna es una sesión válida. Sin esa salida, una lista
+// de doce preguntas es un formulario, y un formulario se abandona.
 //
 // Son las que no caben en ninguna otra silla. El diario no las puede hacer
-// —no se contesta en un respiro— y el costurero tampoco —no son sobre el
-// trabajo, son sobre para qué—.
+// —no se contesta en un respiro— y el costurero tampoco —ahí se escribe el
+// juego, aquí se pregunta para qué—.
 export const PREGUNTAS_DIFICILES = [
+  { titulo: '¿Qué aspecto de tu vida está descuidado?',
+    ayuda: '¿Y podría haber una camiseta para trabajarlo?' },
+  { titulo: '¿Qué tienes que hacer y no estás haciendo?',
+    ayuda: 'Lo sabes desde antes de leer la pregunta.' },
   { titulo: '¿Qué pregunta llevas meses sin contestar?',
     ayuda: 'No la que no sabes responder: la que no te has sentado a responder.' },
   { titulo: '¿En qué meta larga no sientes que avanzas?',
     ayuda: 'Y si es así hace rato, ¿sigue siendo tuya?' },
-  { titulo: '¿Qué no está en el clóset y podría estar?',
-    ayuda: 'Algo que ya estás viviendo sin nombre todavía.' },
+  { titulo: '¿Cuáles fueron esos actos generosos y arriesgados que funcionaron?',
+    ayuda: 'Los que hiciste sin saber si iban a salir bien.' },
+  { titulo: '¿Qué no está en tu lista y podría estar?',
+    ayuda: 'Todo lo que ni siquiera se te ha ocurrido poner.' },
+  { titulo: '¿Qué podrías hacer que nunca has hecho?',
+    ayuda: 'No lo que te falta terminar: lo que nunca has empezado.' },
   { titulo: '¿Cómo te disrumpirías a ti mismo?',
     ayuda: 'Si alguien quisiera dejarte obsoleto, ¿por dónde empezaría?' },
+  { titulo: '¿Estás trabajando en algo que pueda cambiar el mundo?',
+    ayuda: 'Aunque sea el tuyo.' },
+  { titulo: '¿Te estás enfocando en lo urgente o en lo importante?',
+    ayuda: 'Lo urgente grita; lo importante espera callado.' },
   { titulo: '¿Qué estás sosteniendo solo porque ya lo empezaste?',
     ayuda: 'Terminar no siempre es la virtud.' },
   { titulo: '¿Quién quieres ser el año entrante?',
     ayuda: 'Y qué de lo que tienes puesto te lleva para allá.' },
+];
+
+// El banco del costurero. Distinto del de arriba a propósito: estas son
+// concretas y sobre el trabajo de la semana, no sobre el sentido de la vida.
+// Reemplazan a "¿hacia dónde va este trabajo?", que con veinte camisetas
+// encima no se sabía a cuál trabajo se refería.
+export const PREGUNTAS_COSTURERO = [
+  { titulo: '¿Qué 3–5 cosas te tienen incómodo?',
+    ayuda: 'Las que, si las haces, te dejarían satisfecho con el día.' },
+  { titulo: '¿Qué avance haría más fáciles o irrelevantes a los otros?',
+    ayuda: 'Casi siempre hay uno que desatasca a los demás.' },
+  { titulo: '¿Qué le falta a tu día?',
+    ayuda: 'No lo que sobra: lo que no está.' },
+  { titulo: '¿Qué es eso que siempre dices que vas a hacer y nunca haces?',
+    ayuda: 'Sí, eso.' },
 ];
 
 export const TEXTOS_OBSERVADOR = {

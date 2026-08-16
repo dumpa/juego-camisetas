@@ -1,6 +1,6 @@
 # Los rituales — cómo quedaron construidos
 
-Estado a **16 de agosto de 2026**, esquema **v10**.
+Estado a **16 de agosto de 2026**, esquema **v11**.
 
 Este documento es el puente entre la doctrina y el código: dice **dónde vive
 cada cosa y qué forma tiene el dato**, para no tener que releer 3.900 líneas de
@@ -17,9 +17,9 @@ Tampoco es un plan: el plan y la historia viven en Notion.
 
 | Pieza | Dónde | Qué es |
 |---|---|---|
-| Estado, migraciones, `aplicarMovida`, `enJuego` | `src/estado.js` | Lo único que sabe qué es un estado válido |
+| Estado, migraciones, `aplicarMovida`, `colocarEn`, `reordenarEntre`, `enJuego`, respaldo | `src/estado.js` | Lo único que sabe qué es un estado válido |
 | Ecos, `paraQueDia`, `yaEscogio`, `calcularSeñales` | `src/ecos/` | Lo que el app se atreve a decir en voz alta |
-| Comprobaciones del mensual | `src/observador/` | Cinco funciones puras + sus textos |
+| Comprobaciones del mensual y los dos bancos de preguntas | `src/observador/` | Cinco funciones puras + sus textos |
 | `EscogerLaRopa`, `SesionCosturero`, `SesionObservador` | `src/App.jsx` | Las tres pantallas |
 | Pruebas | `tests/*.test.mjs` | `npm test` |
 
@@ -60,12 +60,21 @@ si se hizo de noche apuntando a mañana, en la mañana no se vuelve a pedir.
 ### El costurero (semanal)
 
 ```js
-sesiones[] += { id, date, tipo: 'semanal', notas, caliente, fria, }
+sesiones[] += {
+  id, date, tipo: 'semanal',
+  calientes: [{ id, nombre, emoji }],   // varias, no una
+  frias:     [{ id, nombre, emoji }],
+  pregunta: '¿Qué le falta a tu día?',  // la del banco, esa semana
+  notas: '…',                            // la respuesta, opcional
+}
 ```
 
-Sin cambios de forma respecto a la versión anterior. Lo que cambió es el
-camino: se entra escogiendo qué camiseta remendar y las misiones nuevas se
-siembran **al cerrar**, no al teclearlas.
+Las sesiones de antes del 16 de agosto guardan `caliente`/`fria` como un id
+suelto más `caliente_nombre`. **La Historia lee las dos formas**; no se
+migraron, porque las sesiones son historia y la historia no se reescribe.
+
+Se entra escogiendo qué camiseta remendar y las misiones nuevas se siembran
+**al cerrar**, no al teclearlas.
 
 ### El observador (mensual)
 
@@ -73,8 +82,7 @@ siembran **al cerrar**, no al teclearlas.
 sesiones[] += {
   id, date, tipo: 'mensual',
   hallazgo: 'derivaDePuntos',    // cuál comprobación salió, o null
-  pregunta: '¿En qué meta larga…?',
-  honesto: '…',                  // la respuesta a la difícil
+  respuestas: [{ pregunta, respuesta }],   // solo las contestadas
   notas: 'pregunta → respuesta · pregunta → respuesta',
 }
 ```
@@ -82,11 +90,26 @@ sesiones[] += {
 `hallazgo` existe para una sola cosa: que la comprobación del mes pasado pierda
 fuerza el mes siguiente.
 
+Las preguntas **salen todas** (una por pantalla) y todas se pueden pasar: las
+pasadas no quedan en `respuestas`. Contestar ninguna es una sesión válida, y
+se puede terminar a mitad de camino sin perder lo escrito.
+
 ---
 
 ## 3. Las trampas
 
-Cinco cosas que parecen inocentes y no lo son.
+Siete cosas que parecen inocentes y no lo son.
+
+**El respaldo es lo único que hay.** Sin backend, si `localStorage` se desaloja
+no queda nada en ninguna parte. De ahí que `RespaldoView` sea vista propia, que
+tenga puerta en la bienvenida —quien llega a restaurar todavía no tiene
+camisetas, y la bienvenida le ganaba el turno— y que restaurar muestre qué trae
+el archivo antes de pisar nada.
+
+**Reordenar necesita saber qué lista se está viendo.** `reordenarEntre` recibe
+los ids visibles. Sin eso movía ±1 dentro de `s.camisetas` mientras la pantalla
+mostraba solo las puestas, y la flecha intercambiaba la camiseta con algo
+invisible: el clic no hacía nada. Ya se escapó una vez.
 
 **La frontera de v10.** `puesta` significa dos cosas distintas según el lado de
 la frontera: antes, una identidad activa que duraba meses; después, la atención
@@ -119,7 +142,7 @@ sitios es una racha con otro nombre, y va a parecer una buena idea.
 
 ## 4. Lo que verifican las pruebas
 
-`npm test` — 39 casos, sin dependencias, solo el runner de Node.
+`npm test` — 55 casos, sin dependencias, solo el runner de Node.
 
 Lo que cubren no es la mecánica sino **las reglas que se rompen sin querer**:
 
@@ -135,6 +158,12 @@ Lo que cubren no es la mecánica sino **las reglas que se rompen sin querer**:
   inventar.
 - `codec.test.mjs` — round-trip de molde y snapshot.
 
+Dos pruebas de `estado.test.mjs` merecen mención aparte porque cuidan promesas,
+no comportamiento: que **el nombre del partner nunca salga en el molde** —la
+garantía la da la lista blanca del codec, y la prueba existe porque es la clase
+de promesa que se rompe en silencio el día que alguien la cambie por un
+spread—, y que **un respaldo de una versión más nueva se rechace**.
+
 **Al tocar el modelo de datos hay que sumarle un caso a `estado.test.mjs`** que
 pruebe que no se pierde nada. Es más barato que descubrirlo en el teléfono.
 
@@ -142,7 +171,10 @@ pruebe que no se pierde nada. Es más barato que descubrirlo en el teléfono.
 
 ## 5. Lo que no está construido
 
-- El **partner por camiseta** y el reporte al partner (`docs/partner-checkins.md`).
+- Del **partner** está la v1 (campo + mensaje por el share sheet). Falta el eco
+  de recordatorio y el reporte de avances, que es la pieza más delicada de todo
+  el plan: un reporte leído por otra persona convierte el juego en una
+  rendición de cuentas. Ver `docs/partner-checkins.md`.
 - El **criterio de selección del eco**: qué fragmento propio merece volver. Hoy
   los ecos devuelven frases escritas, no material del usuario.
 - El **banco de frases del manifiesto** para el ritual diario. La doctrina pide

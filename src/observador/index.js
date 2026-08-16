@@ -31,7 +31,8 @@
 //   · creación vs. juego ....................... created_at + movimientos
 //   · deriva del promedio de puntos ............ movimientos[].monto
 
-import { HALLAZGOS, PREGUNTAS_DIFICILES } from './textos.js';
+import { HALLAZGOS, PREGUNTAS_DIFICILES, PREGUNTAS_COSTURERO } from './textos.js';
+import { semanaDe } from '../ecos/index.js';
 
 const DIA = 86400000;
 const TONOS = ['fisica', 'emocional', 'creativa', 'profunda', 'estrategica'];
@@ -241,11 +242,17 @@ export function mirar(state, { ahora = new Date(), ultimaClave = null } = {}) {
   };
 }
 
-// La pregunta difícil del mes. Estable dentro del mismo mes y distinta al
-// mes siguiente: no es azar, es la ocasión.
-export function preguntaDificil(ahora = new Date()) {
-  const semilla = ahora.getFullYear() * 12 + ahora.getMonth();
-  return PREGUNTAS_DIFICILES[semilla % PREGUNTAS_DIFICILES.length];
+// La pregunta del costurero. Estable dentro de la misma semana: si abres el
+// ritual el martes y lo terminas el jueves, es la misma pregunta. Cambia al
+// pasar a la semana siguiente.
+export function preguntaDelCosturero(ahora = new Date()) {
+  // La misma noción de semana que usan los ecos, anclada al lunes. Con
+  // bloques de siete días desde enero la semana cortaba un miércoles, y
+  // abrir el costurero el martes y terminarlo el jueves cambiaba la pregunta.
+  const clave = semanaDe(ahora);
+  let h = 0;
+  for (let i = 0; i < clave.length; i++) h = (h * 31 + clave.charCodeAt(i)) | 0;
+  return PREGUNTAS_COSTURERO[Math.abs(h) % PREGUNTAS_COSTURERO.length];
 }
 
-export { PREGUNTAS_DIFICILES };
+export { PREGUNTAS_DIFICILES, PREGUNTAS_COSTURERO };
