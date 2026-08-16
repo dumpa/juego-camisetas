@@ -76,10 +76,23 @@ Detalle completo en `docs/rituales.md`. Aquí solo lo que se cerró y cuándo.
 - **El costurero se entra escogiendo qué camiseta remendar** (15 ago 2026), y al terminar se puede seguir con otra. Antes era un carrusel de N pasos, uno por camiseta en el orden en que estuvieran: con veinte camisetas eso es un trámite, y un trámite se abandona a la mitad.
 - **Las señales del costurero no llevan número** (15 ago 2026). "Sin misiones que hacer" y "hace rato no se juega" son booleanos: un contador de días sería una racha con otro nombre. Y una camiseta recién creada nunca sale dormida — no ha tenido cuándo jugarse, y decirlo sería un reproche por existir.
 - **El costurero ve el clóset entero, no lo puesto** (15 ago 2026). Consecuencia directa de v10: si mirara solo lo puesto, solo se podría coser lo que uno se puso esa mañana.
+- **La temperatura admite varias calientes y varias frías** (16 ago 2026). Obligar a escoger una sola era pedirle al usuario que resumiera de más. Una camiseta no puede estar en las dos listas: entrar a una la saca de la otra. Las sesiones viejas guardaban un id suelto y se siguen leyendo así.
+- **Se retira "¿hacia dónde va este trabajo?"** (16 ago 2026) y entra un banco de preguntas concretas, una por semana. Razón del autor: con muchas identidades y muchas camisetas encima no se sabe a cuál trabajo se refiere, y una pregunta que hay que descifrar antes de contestarla no se contesta.
+- **El observador muestra TODAS las preguntas difíciles, no una por mes** (16 ago 2026). Es la sesión que se agenda para sentarse un rato; mostrar una sola convertía media hora reservada en tres minutos. Lo que las hace soportables no es que sean pocas: es que **se pueden pasar**, y contestar ninguna es una sesión válida. Sin esa salida, doce preguntas son un formulario. Se puede terminar a mitad de camino sin perder lo ya escrito.
+- **Sigue siendo UN solo hallazgo calculado** (16 ago 2026). Lo que se abrió es el banco de preguntas, no el tablero: las comprobaciones sobre datos siguen presentándose de a una.
 - **"Lavar la ropa" vive solo en el clóset** (15 ago 2026). No entra al paso 1 del ritual diario: sería un atajo para las 19 justo donde el ritual pide mirarlas una por una. El botón de pánico se busca; no se ofrece dentro de la reflexión.
 - **Al día siguiente no se evalúa lo que se escogió.** Es una propuesta, no un contrato.
 - **El observador guarda qué comprobación mostró** (15 ago 2026), en la sesión mensual (`hallazgo`). La del mes pasado pierde la mitad de su fuerza al mes siguiente, pero no queda descalificada: si sigue siendo con diferencia lo más gordo que pasa, vuelve — y que vuelva también es información.
 - **Qué datos puede mirar el observador** (15 ago 2026): tono de las misiones, duración activa antes de archivar, gastada vs. abandonada, tasa de creación vs. juego, deriva del promedio de puntos. **Qué no:** rachas, días activos, curvas de actividad. Y se presenta una sola comprobación por sesión, convertida en pregunta — nunca un tablero.
+
+## El respaldo
+
+- **El respaldo es vista propia, no un bloque al fondo del Diario** (16 ago 2026). Sin backend, el archivo que sale de ahí es lo único que hay entre el usuario y perderlo todo; el navegador puede desalojar `localStorage` sin avisar. Antes exportaba al portapapeles —que se pierde con el siguiente copiar— e importaba por un `prompt()` donde había que pegar mil líneas: en un teléfono, impracticable.
+- **Sale como archivo por el share sheet**, entra por selector de archivo, y pegar queda de segunda opción.
+- **Se muestra qué trae el archivo antes de pisar nada.** Restaurar es el único gesto que borra todo de una.
+- **Un respaldo de una versión más nueva se rechaza.** `migrate` solo sabe subir; bajar sería inventar, y lo que inventaría es el juego entero de alguien.
+- **Hay una puerta en la bienvenida** («ya tengo un respaldo»). Quien llega de un teléfono nuevo no tiene camisetas, así que la bienvenida le ganaba el turno y la única salida era rearmar el clóset a mano.
+- **No hay eco de "hace rato no respaldas"** (16 ago 2026). Eso cuenta ausencias del usuario, que es justo lo prohibido. El camino se hace fácil y visible; el app no insiste.
 
 ## Datos, codec y privacidad
 
@@ -90,6 +103,8 @@ Detalle completo en `docs/rituales.md`. Aquí solo lo que se cerró y cuándo.
 - **Las migraciones son acumulativas** y los respaldos crudos `state:pre-v7` / `state:pre-v8` nunca se sobrescriben.
 - **El significado de `puesta` cambia con el rediseño del ritual diario.** Antes: identidad activa, duraba meses. Después: atención de un día. La migración v10 ya no depende de que alguien anote la fecha a mano: **escribe un evento `frontera_puesta_diaria`** en la historia de cada usuario, con su propio `ts`. Cualquier cálculo que cruce esa frontera lee dos cosas distintas bajo el mismo nombre y ahora tiene cómo saberlo. No afecta la duración de una identidad, que se mide de creación a archivo.
 - **`archived_at` de la camiseta se elimina** (15 ago 2026). Hoy `aplicarMovida` lo estampa cada vez que una camiseta sale de "puesta" y lo pone en `null` cada vez que vuelve; con la atención diaria eso se reescribiría todas las noches y lavar la ropa lo estamparía en 19 camisetas de un golpe. El campo ya no tiene oficio: quitarse una camiseta no es archivarla, y la muerte de una identidad vive en el evento `camiseta_donada`, no en un campo de una camiseta que ya salió del array. Como reescribe un campo existente, esta sí lleva respaldo crudo `state:pre-v10`. **No confundir con el `archived_at` de una misión**, que se queda tal cual.
+- **Cada camiseta puede tener un partner** (16 ago 2026, esquema v11). Un nombre, opcional, que **se queda en el teléfono**: no viaja en el codec —que exporta por lista blanca— ni sale en ninguna URL. Compartir una camiseta no debe cargarle a nadie un rol que no pidió.
+- **El check-in con el partner es un mensaje, no un evento** (16 ago 2026). Abre el share sheet con «Quisiera revisar contigo los avances con la camiseta X» y ahí se acaba: el app no manda nada, no sabe a quién se lo mandaste y **no registra que lo hiciste**. El destinatario se escoge en WhatsApp. Sin ecos, sin citas, sin reporte de avances — ver `docs/partner-checkins.md` para lo que quedó pendiente y por qué el reporte es lo más delicado de todo el plan.
 - **Todas las aperturas del app se registran en `visitas[]`** (14 jul 2026), no una por día: el patrón de hora del día es lo que alimenta la distinción jefe/hacedor.
 
 ## Estética y vocabulario

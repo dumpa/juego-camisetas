@@ -43,7 +43,7 @@ No hay linter configurado. Los tests corren sin dependencias, solo con el runner
 
 ## Modelo de datos clave
 
-El estado (`STATE_KEY` en localStorage, `version: 10`) tiene `camisetas` (cada una con `misiones`, `milestones`, ubicación en el clóset), `sesiones`, `eventos`, `movimientos`, `visitas`, `cerros`. El "clóset" es un mueble con 5 `GANCHOS` fijos (a propósito, no configurable) + `cerros` (pilas) ilimitados; cada camiseta está en exactamente una ubicación (`puesta`, `gancho`, o `cerro`).
+El estado (`STATE_KEY` en localStorage, `version: 11`) tiene `camisetas` (cada una con `misiones`, `milestones`, ubicación en el clóset), `sesiones`, `eventos`, `movimientos`, `visitas`, `cerros`. El "clóset" es un mueble con 5 `GANCHOS` fijos (a propósito, no configurable) + `cerros` (pilas) ilimitados; cada camiseta está en exactamente una ubicación (`puesta`, `gancho`, o `cerro`).
 
 Migraciones (`migrate()` en `src/estado.js`) son acumulativas por versión — al tocar el modelo de datos, sumar un paso de migración ahí, no romper los anteriores, y sumarle un caso a `tests/estado.test.mjs` que pruebe que no se pierde nada. Antes de migrar de v7, v8 y v10 el app congela un backup crudo en `localStorage` (`state:pre-v7`, `state:pre-v8`, `state:pre-v10`) — nunca sobrescribir esas keys. Solo llevan respaldo los pasos que reescriben o borran datos existentes; los que solo añaden campos, no.
 

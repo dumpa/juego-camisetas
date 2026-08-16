@@ -5,7 +5,7 @@ import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encode
 import { elegirEco, silenciarEco, citaVigente, paraQueDia, yaEscogio, calcularSeñales, ultimaSesion } from './ecos/index.js';
 import { TEXTOS } from './ecos/textos.js';
 import { construirICS, entregarCita, proximaCita, DURACION, aInputLocal, deInputLocal } from './cita.js';
-import { mirar, preguntaDificil } from './observador/index.js';
+import { mirar, preguntaDelCosturero, PREGUNTAS_DIFICILES } from './observador/index.js';
 import { TEXTOS_OBSERVADOR } from './observador/textos.js';
 
 import {
@@ -26,7 +26,11 @@ import {
   saveState,
   pushEvento,
   aplicarMovida,
+  colocarEn,
+  reordenarEntre,
   enJuego,
+  armarRespaldo,
+  revisarRespaldo,
   uid,
   nowISO,
 } from './estado.js';
@@ -201,6 +205,7 @@ export default function App() {
   const [previewCat, setPreviewCat] = useState(null);
   const [showImport, setShowImport] = useState(false);
   const [sesion, setSesion] = useState(null);
+  const [showRespaldo, setShowRespaldo] = useState(false);
   const [showNota, setShowNota] = useState(false);  // hoja de nota rápida (global)
   // Hoja de cita: { cadencia, origen: 'cierre' | 'eco', eco? }. La abre el
   // final de un check-in o el eco; es la misma hoja en los dos casos.
@@ -354,7 +359,7 @@ export default function App() {
   };
   // Guardar en el clóset = mandarla al cerro sin doblar. Ponérsela = sacarla.
   // Las dos son la misma movida de siempre, con otro nombre.
-  const moverCamiseta = (id, destino) => update(s => { aplicarMovida(s, id, destino); });
+  const moverCamiseta = (id, destino, ranura = null) => update(s => { colocarEn(s, id, destino, ranura); });
   const archiveCamiseta = (id) => update(s => { aplicarMovida(s, id, AL_SIN_DOBLAR()); });
   const reviveCamiseta = (id) => update(s => { aplicarMovida(s, id, PUESTA()); });
 
@@ -572,16 +577,9 @@ export default function App() {
     pushEv(s, { tipo: 'mision_descompletada', cam_id: camId, mision_id: misId, nombre: m.nombre, causa: 'undo' });
   });
   // Move a camiseta up/down in the persistent order. dir = -1 (up) | +1 (down).
-  // We move within the full s.camisetas array so it works whether the camiseta
-  // is active or archived; UI lists filter on top.
-  const reorderCamiseta = (camId, dir) => update(s => {
-    const idx = s.camisetas.findIndex(c => c.id === camId);
-    if (idx === -1) return;
-    const target = idx + dir;
-    if (target < 0 || target >= s.camisetas.length) return;
-    const [moved] = s.camisetas.splice(idx, 1);
-    s.camisetas.splice(target, 0, moved);
-  });
+  // El detalle de por qué esto necesita saber qué lista se está viendo está
+  // en reordenarEntre (src/estado.js), junto a la prueba que lo cuida.
+  const reorderCamiseta = (camId, dir, entre = null) => update(s => { reordenarEntre(s, camId, dir, entre); });
   const logSesion = (data) => update(s => {
     const id = uid();
     s.sesiones.push({ id, date: nowISO(), ...data });
@@ -641,9 +639,18 @@ export default function App() {
     /></Frame>;
   }
 
+  // Vista propia, no capa flotante: es texto largo con su propio scroll, y
+  // además evita de raíz el bug de position:fixed dentro de una vista animada.
+  //
+  // Va antes de la bienvenida a propósito: quien llega a restaurar todavía no
+  // tiene camisetas, y la bienvenida le ganaría el turno para siempre.
+  if (showRespaldo) return <Frame><RespaldoView state={state}
+    onVolver={() => setShowRespaldo(false)}
+    onRestaurado={() => window.location.reload()} /></Frame>;
+
   // Bienvenida: primera vez sin camisetas y sin haber decidido aún
   if (state.camisetas.length === 0 && !showCreate && !showCatalogo && !showImport) {
-    return <Frame><Welcome onCatalogo={() => setShowCatalogo(true)} onCrear={() => setShowCreate(true)} onImport={() => setShowImport(true)} /></Frame>;
+    return <Frame><Welcome onCatalogo={() => setShowCatalogo(true)} onCrear={() => setShowCreate(true)} onImport={() => setShowImport(true)} onRespaldo={() => setShowRespaldo(true)} /></Frame>;
   }
   if (showImport) {
     return <Frame><ImportSheet
@@ -799,7 +806,8 @@ export default function App() {
       {tab === 'hoy' && <HoyView cams={camsActivas} movimientos={state.movimientos} onToggle={toggleMision} onUndo={undoUltimaCompletion} onOpen={setOpenCam} />}
       {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} onDoblar={setDoblarCam} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion}
-        onAgendar={(cadencia) => setPedirCita({ cadencia, origen: 'diario' })} />}
+        onAgendar={(cadencia) => setPedirCita({ cadencia, origen: 'diario' })}
+        onRespaldo={() => setShowRespaldo(true)} />}
     </main>
     <QuickNoteButton onClick={() => setShowNota(true)} />
     <TabBar tab={tab} setTab={setTab} />
@@ -1200,7 +1208,7 @@ function InstallGate({ deferredPrompt, onInstall, onContinue }) {
   </div>);
 }
 
-function Welcome({ onCatalogo, onCrear, onImport }) {
+function Welcome({ onCatalogo, onCrear, onImport, onRespaldo }) {
   return (<div className="min-h-screen flex flex-col justify-center items-center px-8 max-w-xl mx-auto text-center">
     <div className="fade-up smallcaps mb-6" style={{ color: 'var(--ink-faint)' }}>El juego de las camisetas</div>
     <h1 className="fade-up-d1 display text-5xl md:text-6xl leading-[1.05] mb-4">
@@ -1221,7 +1229,13 @@ function Welcome({ onCatalogo, onCrear, onImport }) {
     <button onClick={onImport} className="fade-up-d3 ff-mono text-xs ring-ink py-2 px-3 mt-1 flex items-center gap-1.5" style={{ color: 'var(--ink-faint)' }}>
       <Inbox size={12} /><span>o recibir una de alguien</span>
     </button>
-    <div className="fade-up-d3 ff-mono text-xs mt-16" style={{ color: 'var(--ink-faint)' }}>v0.5 · prototipo</div>
+    {/* Quien vuelve —teléfono nuevo, navegador borrado— no está empezando:
+        está recuperando. Si esta puerta no está aquí, la única salida es
+        armar el clóset otra vez a mano. */}
+    <button onClick={onRespaldo} className="fade-up-d3 ff-mono text-xs ring-ink py-2 px-3 mt-6" style={{ color: 'var(--ink-soft)', borderBottom: '1px solid var(--line)' }}>
+      ya tengo un respaldo
+    </button>
+    <div className="fade-up-d3 ff-mono text-xs mt-14" style={{ color: 'var(--ink-faint)' }}>v0.5 · prototipo</div>
   </div>);
 }
 
@@ -1413,12 +1427,17 @@ function EditCamiseta({ cam, onSave, onCancel }) {
   const [esencia, setEsencia] = useState(cam.esencia || '');
   const [arcoDe, setArcoDe] = useState(cam.arco?.de || '');
   const [arcoA, setArcoA] = useState(cam.arco?.a || '');
+  const [partner, setPartner] = useState(cam.partner?.nombre || '');
 
   const submit = () => onSave({
     nombre: nombre.trim() || cam.nombre,
     emoji: emoji.trim() || '◇',
     esencia: esencia.trim(),
     arco: (arcoDe.trim() && arcoA.trim()) ? { de: arcoDe.trim(), a: arcoA.trim() } : null,
+    // El nombre del partner se queda en este teléfono: no viaja en el codec
+    // (que exporta por lista blanca) ni sale en ninguna URL. Compartir una
+    // camiseta no debe cargarle a nadie un rol que no pidió.
+    partner: partner.trim() ? { activo: true, nombre: partner.trim(), tipo: null } : null,
   });
 
   return (<div className="px-6 pt-6 pb-32 max-w-xl mx-auto fade-up">
@@ -1458,6 +1477,17 @@ function EditCamiseta({ cam, onSave, onCancel }) {
         placeholder="qué se activa al ponértela"
         className="w-full ff-serif text-base p-3 ring-ink resize-none italic"
         style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+    </div>
+
+    <div className="mb-6">
+      <div className="smallcaps mb-2" style={{ color: 'var(--ink-faint)' }}>con quién la revisas <span className="lowercase tracking-normal opacity-60">(opcional)</span></div>
+      <input value={partner} onChange={e => setPartner(e.target.value)}
+        placeholder="un nombre"
+        className="w-full ff-serif text-lg pb-2 ring-ink"
+        style={{ borderBottom: '1px solid var(--line)' }} />
+      <p className="ff-serif text-sm mt-2" style={{ color: 'var(--ink-faint)' }}>
+        Solo para ti: se queda en este teléfono y no viaja cuando compartes la camiseta. El app no sabe quién es ni le escribe.
+      </p>
     </div>
 
     <div className="mb-8">
@@ -1659,19 +1689,30 @@ function useArrastre(onSoltar, onTap) {
       const movido = Math.hypot(x - st.current.x0, y - st.current.y0) > 6;
       const el = document.elementFromPoint(x, y)?.closest?.('[data-drop]');
       st.current.zona = movido ? (el?.dataset?.drop ?? null) : null;
+      // Dentro de una zona con orden, en qué hueco cayó el dedo: sobre qué
+      // tarjeta está y de qué lado de su mitad. Sin esto, soltar entre las
+      // puestas dejaba la camiseta en cualquier parte de la lista, que es lo
+      // que se sentía como "no queda donde quiero".
+      const tarjeta = movido ? document.elementFromPoint(x, y)?.closest?.('[data-slot]') : null;
+      if (tarjeta) {
+        const r = tarjeta.getBoundingClientRect();
+        st.current.ranura = { id: tarjeta.dataset.slot, antes: y < r.top + r.height / 2 };
+      } else {
+        st.current.ranura = null;
+      }
       st.current.movido = movido;
       st.current.dir = !movido ? 0 : y < 100 ? -1 : y > window.innerHeight - 100 ? 1 : 0;
       setZona(st.current.zona);
       setDrag(d => d && { ...d, x, y, movido });
     };
     const soltar = () => {
-      const { movido, zona: z, cam } = st.current;
+      const { movido, zona: z, cam, ranura } = st.current;
       st.current.dir = 0;
       setDrag(null); setZona(null);
       // Soltar sin haber movido el dedo es un toque en el agarradero: en vez
       // de arrastrar, se abre la lista de sitios. Misma intención, otra mano.
       if (!movido) { onTap?.(cam); return; }
-      if (z) onSoltar(cam, z);
+      if (z) onSoltar(cam, z, ranura);
     };
     window.addEventListener('pointermove', mover);
     window.addEventListener('pointerup', soltar);
@@ -1820,9 +1861,9 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
 
 
   const { agarrar, fantasma, zona, arrastrando } = useArrastre(
-    (cam, destino) => {
+    (cam, destino, ranura) => {
       const [tipo, arg] = destino.split(':');
-      if (tipo === 'puesta') onMover(cam.id, PUESTA());
+      if (tipo === 'puesta') onMover(cam.id, PUESTA(), ranura);
       else if (tipo === 'gancho') onMover(cam.id, { tipo: 'gancho', posicion: Number(arg) });
       else if (tipo === 'cerro') onMover(cam.id, { tipo: 'cerro', cerroId: arg });
     },
@@ -1830,6 +1871,9 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
   );
 
   const puestas = cams.filter(estaPuesta);
+  // El orden que el usuario ve. Las flechas reordenan dentro de esto, no
+  // dentro del array completo, que incluye lo que está en ganchos y cerros.
+  const idsPuestas = puestas.map(c => c.id);
   const ordenados = ordenarCerros(cerros);
   const toggleCerro = (id) => setCerrados(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
@@ -1869,20 +1913,20 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
         const act = cam.misiones.filter(m => enJuego(m)).length;
         const hechasTot = cam.misiones.reduce((acc, m) => acc + (m.completed_at ? 1 : 0) + (m.completions?.length || 0), 0);
         const puntosTot = puntosCamiseta(movimientos, cam.id);
-        return (<div key={cam.id} className="flex" style={{
+        return (<div key={cam.id} data-slot={cam.id} className="flex" style={{
           background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 2,
           opacity: arrastrando === cam.id ? 0.35 : 1,
         }}>
           <div className="flex flex-col items-center justify-center border-r" style={{ borderColor: 'var(--line-soft)' }}>
             {puestas.length > 1 && (
-              <button onClick={() => onReorder(cam.id, -1)} disabled={i === 0}
+              <button onClick={() => onReorder(cam.id, -1, idsPuestas)} disabled={i === 0}
                 className="ring-ink p-1.5 disabled:opacity-20" style={{ color: 'var(--ink-faint)' }} aria-label="Subir camiseta">
                 <ChevronUp size={16} strokeWidth={1.5} />
               </button>
             )}
             <Agarradero onPointerDown={e => agarrar(e, cam)} label={`Mover ${cam.nombre}`} />
             {puestas.length > 1 && (
-              <button onClick={() => onReorder(cam.id, +1)} disabled={i === puestas.length - 1}
+              <button onClick={() => onReorder(cam.id, +1, idsPuestas)} disabled={i === puestas.length - 1}
                 className="ring-ink p-1.5 disabled:opacity-20" style={{ color: 'var(--ink-faint)' }} aria-label="Bajar camiseta">
                 <ChevronDown size={16} strokeWidth={1.5} />
               </button>
@@ -2232,6 +2276,28 @@ function CamisetaDetail({ cam, movimientos, onBack, onDoblar, onAddMision, onEdi
       {cam.nombre}
       {!estaPuesta(cam) && <span className="ff-mono text-xs ml-3 align-middle" style={{ color: 'var(--ink-faint)' }}>en el clóset</span>}
     </h1>
+    {/* Revisar con el partner. Es un mensaje que abre el share sheet, nada
+        más: el app no manda nada, no sabe a quién se lo mandas y no registra
+        que lo hiciste. El destinatario lo escoges en WhatsApp.
+
+        Deliberadamente NO comparte cómo va la camiseta. Un reporte de avances
+        leído por otra persona convierte el juego en una rendición de cuentas,
+        que es justo lo que la regla de no medir asistencia evita por dentro.
+        Esto solo abre la conversación; lo que se cuente se cuenta hablando. */}
+    {cam.partner?.activo && (
+      <button onClick={() => {
+        const texto = `Quisiera revisar contigo los avances con la camiseta «${cam.nombre}»`;
+        if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+          navigator.share({ text: texto }).catch(() => {});
+        } else {
+          navigator.clipboard?.writeText(texto);
+        }
+      }}
+        className="ring-ink ff-mono text-xs py-2 px-3 mb-4 flex items-center gap-2"
+        style={{ color: 'var(--ocean)', border: '1px solid var(--ocean)' }}>
+        <Share2 size={12} /><span>revisar con {cam.partner.nombre}</span>
+      </button>
+    )}
     {cam.arco && (<div className="ff-mono text-xs mb-3" style={{ color: 'var(--ink-soft)' }}>
       {cam.arco.de} <span style={{ color: 'var(--ink-faint)' }}>→</span> {cam.arco.a}
     </div>)}
@@ -2959,7 +3025,7 @@ function AddMilestone({ onSave, onCancel }) {
   return <MilestoneForm onSave={onSave} onCancel={onCancel} submitLabel="añadir" />;
 }
 
-function DiarioView({ state, onStart, onAgendar }) {
+function DiarioView({ state, onStart, onAgendar, onRespaldo }) {
   const ult = (tipo) => state.sesiones.filter(s => s.tipo === tipo).slice(-1)[0];
   // La puerta al ritual diario está siempre abierta —nada de "vuelve después
   // de las 6"—; lo único que cambia con la hora es a qué día apunta. Si ya se
@@ -3018,67 +3084,182 @@ function DiarioView({ state, onStart, onAgendar }) {
     <h2 className="smallcaps mb-4" style={{ color: 'var(--ink-faint)' }}>la historia</h2>
     <Historia state={state} />
     <div className="hr-deco mt-10 mb-6" />
-    <BackupTools state={state} />
+    {/* El respaldo no puede seguir escondido al fondo: sin backend, es lo
+        único que hay entre el usuario y perderlo todo. Aquí solo va la
+        puerta; la explicación vive en su propia vista. */}
+    <button onClick={onRespaldo} className="block w-full text-left p-4 ring-ink"
+      style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)' }}>
+      <h3 className="ff-serif text-xl mb-1">Guardar una copia del juego</h3>
+      <p className="ff-serif text-sm" style={{ color: 'var(--ink-soft)' }}>
+        Todo esto vive solo en este teléfono. Un respaldo toma diez segundos.
+      </p>
+    </button>
   </div>);
 }
 
-function BackupTools({ state }) {
-  const [estado, setEstado] = useState(''); // '' | 'copiado' | 'importado' | 'error'
-  const exportar = async () => {
-    const { _storageOk, _saveError, ...clean } = state;
-    const json = JSON.stringify(clean, null, 2);
+// ── El respaldo ──────────────────────────────────────────────────────────
+//
+// Vista propia y no un bloque al fondo del Diario. La razón no es estética:
+// este app no tiene backend, así que el archivo que salga de aquí es lo único
+// que hay entre el usuario y perderlo todo. El navegador puede desalojar
+// localStorage sin avisar y nadie tiene una copia en ningún servidor.
+//
+// Tres cosas que cambian respecto a la versión vieja, y por qué:
+//   · **Sale como archivo, no al portapapeles.** Un JSON de mil líneas en el
+//     portapapeles de un teléfono es un dato que se pierde con el siguiente
+//     copiar. Como archivo se manda por WhatsApp a uno mismo, se guarda en
+//     Archivos, se manda por correo.
+//   · **Entra por selector de archivo**, no por un prompt() donde hay que
+//     pegar mil líneas. Pegar sigue existiendo abajo, para quien lo tenga en
+//     un mensaje.
+//   · **Se dice qué trae adentro antes de pisar nada.** Restaurar es el único
+//     gesto del app que borra todo de una, y no tiene deshacer visible.
+//
+// Lo que NO lleva, a propósito: ningún recordatorio de "hace rato no
+// respaldas". Eso cuenta ausencias del usuario, que es exactamente lo que el
+// juego no hace. El camino se hace fácil; el app no insiste.
+function RespaldoView({ state, onVolver, onRestaurado }) {
+  const [msg, setMsg] = useState(null);        // { kind: 'ok'|'error', text }
+  const [pegar, setPegar] = useState(false);
+  const [texto, setTexto] = useState('');
+  const [confirmar, setConfirmar] = useState(null);  // { estado, resumen, crudo }
+  const fileRef = useRef(null);
+
+  const guardado = state.camisetas.length;
+
+  async function exportar() {
+    const { json, nombre } = armarRespaldo(state);
+    const blob = new Blob([json], { type: 'application/json' });
     try {
-      await navigator.clipboard.writeText(json);
-      setEstado('copiado');
-      setTimeout(() => setEstado(''), 3000);
+      // El camino bueno en el teléfono: el share sheet del sistema, que deja
+      // mandárselo por WhatsApp a uno mismo o guardarlo en Archivos.
+      const file = new File([blob], nombre, { type: 'application/json' });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Respaldo del juego de las camisetas' });
+        setMsg({ kind: 'ok', text: 'listo — guárdalo donde lo puedas volver a encontrar' });
+        return;
+      }
     } catch (e) {
-      // fallback: descargar
-      const blob = new Blob([json], { type: 'application/json' });
+      if (e.name === 'AbortError') return;   // cancelar no es un error
+    }
+    // En computador, descarga normal.
+    try {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `juego-camisetas-${new Date().toISOString().slice(0,10)}.json`;
-      a.click();
+      a.href = url; a.download = nombre; a.click();
       URL.revokeObjectURL(url);
-      setEstado('copiado');
-      setTimeout(() => setEstado(''), 3000);
+      setMsg({ kind: 'ok', text: `descargado: ${nombre}` });
+    } catch {
+      setMsg({ kind: 'error', text: 'No se pudo guardar el archivo. Prueba desde el navegador en vez de la app instalada.' });
     }
+  }
+
+  const revisar = (crudo) => {
+    const r = revisarRespaldo(crudo);
+    if (!r.ok) { setMsg({ kind: 'error', text: r.error }); return; }
+    setMsg(null);
+    setConfirmar({ ...r, crudo });
   };
-  const importar = async () => {
+
+  const cargarArchivo = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const lector = new FileReader();
+    lector.onload = () => revisar(String(lector.result || ''));
+    lector.onerror = () => setMsg({ kind: 'error', text: 'No se pudo leer ese archivo.' });
+    lector.readAsText(f);
+    e.target.value = '';   // que se pueda escoger el mismo archivo dos veces
+  };
+
+  // Pisar el estado es lo último que pasa, y el anterior queda congelado en
+  // su propia llave: un pegado equivocado deja de ser pérdida total.
+  const restaurar = () => {
     try {
-      const txt = prompt('Pega aquí el JSON exportado:');
-      if (!txt) return;
-      const parsed = JSON.parse(txt);
-      if (!parsed.camisetas) throw new Error('formato inválido');
-      // v7: respaldar lo que hay antes de pisarlo. Un pegado equivocado
-      // deja de ser pérdida total silenciosa.
       const actual = localStorage.getItem(STATE_KEY);
       if (actual) localStorage.setItem(IMPORT_BACKUP_KEY, actual);
-      // reemplazar storage directamente y recargar
-      localStorage.setItem(STATE_KEY, JSON.stringify(parsed));
-      setEstado('importado');
-      setTimeout(() => window.location.reload(), 1000);
-    } catch (e) {
-      console.error(e);
-      setEstado('error');
-      setTimeout(() => setEstado(''), 3000);
+      localStorage.setItem(STATE_KEY, confirmar.crudo);
+      onRestaurado();
+    } catch {
+      setMsg({ kind: 'error', text: 'No se pudo guardar. ¿El teléfono está sin espacio?' });
+      setConfirmar(null);
     }
   };
-  return (<div className="mb-6">
-    <h2 className="smallcaps mb-3" style={{ color: 'var(--ink-faint)' }}>respaldo</h2>
-    <p className="ff-serif italic text-sm mb-3" style={{ color: 'var(--ink-soft)' }}>
-      Exporta el estado del juego como respaldo. Si pierdes los datos al reabrir, puedes pegar lo exportado aquí.
-    </p>
-    <div className="flex flex-wrap gap-2">
-      <button onClick={exportar} className="ring-ink ff-mono text-xs py-1 px-3" style={{ color: 'var(--ink-soft)', border: '1px solid var(--line)' }}>
-        exportar al portapapeles
-      </button>
-      <button onClick={importar} className="ring-ink ff-mono text-xs py-1 px-3" style={{ color: 'var(--ink-soft)', border: '1px solid var(--line)' }}>
-        importar desde JSON
-      </button>
-      {estado === 'copiado' && <span className="ff-mono text-xs self-center" style={{ color: 'var(--moss)' }}>✓ copiado</span>}
-      {estado === 'importado' && <span className="ff-mono text-xs self-center" style={{ color: 'var(--moss)' }}>✓ importado, recargando…</span>}
-      {estado === 'error' && <span className="ff-mono text-xs self-center" style={{ color: 'var(--accent)' }}>✗ error en el formato</span>}
+
+  if (confirmar) {
+    const { resumen } = confirmar;
+    return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
+      <div className="smallcaps mb-8" style={{ color: 'var(--accent)' }}>Antes de restaurar</div>
+      <h1 className="display text-3xl mb-6">Esto es lo que trae el archivo.</h1>
+      <div className="mb-8 space-y-2 ff-serif text-lg">
+        <div>{resumen.camisetas} {resumen.camisetas === 1 ? 'camiseta' : 'camisetas'}</div>
+        <div style={{ color: 'var(--ink-soft)' }}>{resumen.sesiones} {resumen.sesiones === 1 ? 'sesión' : 'sesiones'} de rituales</div>
+      </div>
+      <p className="ff-serif mb-2" style={{ color: 'var(--warm)' }}>
+        Al restaurar, <strong>lo que tienes hoy se reemplaza</strong> por esto
+        {guardado > 0 && <> — ahora mismo tienes {guardado} {guardado === 1 ? 'camiseta' : 'camisetas'}</>}.
+      </p>
+      <p className="ff-serif text-sm mb-8" style={{ color: 'var(--ink-faint)' }}>
+        Lo de hoy no se borra del todo: queda congelado por si te arrepientes. Aun así, si no estabas seguro, exporta primero.
+      </p>
+      <div className="flex justify-between">
+        <button onClick={() => setConfirmar(null)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>cancelar</button>
+        <button onClick={restaurar} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--accent)', color: 'var(--bg)' }}>restaurar</button>
+      </div>
+    </div>);
+  }
+
+  return (<div className="px-6 pt-8 pb-32 max-w-xl mx-auto fade-up">
+    <div className="flex items-center justify-between mb-8">
+      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Respaldo</span>
+      {onVolver && <button onClick={onVolver} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Volver"><X size={18} /></button>}
     </div>
+
+    <h1 className="display text-4xl mb-3">Tu juego vive solo en este teléfono.</h1>
+    <p className="ff-serif mb-10" style={{ color: 'var(--ink-soft)' }}>
+      No hay cuenta ni servidor: nadie más tiene una copia. Si cambias de teléfono, si borras el navegador o si el sistema hace limpieza, se va. Sacar un respaldo toma diez segundos.
+    </p>
+
+    <div className="mb-10">
+      <button onClick={exportar} className="ff-serif text-lg px-6 py-3 w-full ring-ink mb-3"
+        style={{ background: 'var(--ink)', color: 'var(--bg)' }}>
+        guardar una copia
+      </button>
+      <p className="ff-serif text-sm" style={{ color: 'var(--ink-faint)' }}>
+        Se crea un archivo con todo tu juego. Mándatelo por WhatsApp a ti mismo, o guárdalo donde guardes lo que no quieres perder.
+      </p>
+    </div>
+
+    <div className="hr-deco mb-8" />
+
+    <h2 className="ff-serif text-2xl mb-3">¿Ya tienes una copia?</h2>
+    <p className="ff-serif text-sm mb-4" style={{ color: 'var(--ink-soft)' }}>
+      Búscala donde la hayas guardado. Es un archivo que se llama algo como <span className="ff-mono">camisetas-2026-08-16</span>.
+    </p>
+    <input ref={fileRef} type="file" accept="application/json,.json,text/plain" onChange={cargarArchivo} className="hidden" />
+    <button onClick={() => fileRef.current?.click()} className="ff-serif px-5 py-3 w-full ring-ink mb-3"
+      style={{ border: '1px solid var(--ink)' }}>
+      buscar el archivo
+    </button>
+
+    {!pegar ? (
+      <button onClick={() => setPegar(true)} className="ff-mono text-xs ring-ink" style={{ color: 'var(--ink-faint)' }}>
+        o pegar el texto
+      </button>
+    ) : (
+      <div className="fade-up">
+        <textarea value={texto} onChange={e => setTexto(e.target.value)} rows={5} autoFocus
+          placeholder="pega aquí el contenido del respaldo…"
+          className="w-full ff-mono text-xs p-3 ring-ink resize-none mb-2"
+          style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+        <button onClick={() => revisar(texto)} disabled={!texto.trim()}
+          className="ff-mono text-xs ring-ink px-3 py-2 disabled:opacity-30"
+          style={{ border: '1px solid var(--line)', color: 'var(--ink-soft)' }}>revisar lo pegado</button>
+      </div>
+    )}
+
+    {msg && (
+      <p className="ff-serif mt-6" style={{ color: msg.kind === 'ok' ? 'var(--moss)' : 'var(--accent)' }}>{msg.text}</p>
+    )}
   </div>);
 }
 
@@ -3389,10 +3570,20 @@ function EventoItem({ e, cam, lookupCam }) {
   }
 
   const isCierre = e.tipo.startsWith('sesion_');
-  const hasContent = e.notas && e.notas !== '·' || e.caliente || e.fria;
+  // Desde hoy la temperatura admite varias camisetas y viaja con el nombre
+  // congelado. Las entradas viejas guardaban una sola, como id suelto: se
+  // siguen leyendo tal cual, igual que se hizo al jubilar la palabra "mazo".
+  const temperatura = (plural, singular) => {
+    if (Array.isArray(e[plural])) return e[plural];
+    const id = e[singular];
+    if (!id) return [];
+    const c = lookupCam(id);
+    return [{ id, nombre: c?.nombre ?? e[`${singular}_nombre`] ?? '—', emoji: c?.emoji }];
+  };
+  const calientes = temperatura('calientes', 'caliente');
+  const frias = temperatura('frias', 'fria');
+  const hasContent = (e.notas && e.notas !== '·') || calientes.length > 0 || frias.length > 0;
   const expandable = isCierre && hasContent;
-  const caliente = e.caliente ? lookupCam(e.caliente) : null;
-  const fria = e.fria ? lookupCam(e.fria) : null;
   // Truncated single-line preview for collapsed cierre rows — gives the
   // reader something to scan without forcing a tap on every entry.
   const notasPreview = e.notas && e.notas !== '·'
@@ -3422,16 +3613,16 @@ function EventoItem({ e, cam, lookupCam }) {
         {e.notas && e.notas !== '·' && (
           <p className="ff-serif italic text-sm mb-2 whitespace-pre-wrap" style={{ color: 'var(--ink)' }}>"{e.notas}"</p>
         )}
-        {caliente && (
+        {calientes.length > 0 && (
           <div className="ff-mono text-xs flex items-center gap-2 mt-1" style={{ color: 'var(--ink-faint)' }}>
             <Flame size={12} strokeWidth={1.5} style={{ color: 'var(--accent)' }} />
-            <span>caliente · {caliente.emoji} {caliente.nombre}</span>
+            <span>{calientes.length === 1 ? 'caliente' : 'calientes'} · {calientes.map(c => `${c.emoji || ''} ${c.nombre}`.trim()).join(' · ')}</span>
           </div>
         )}
-        {fria && (
+        {frias.length > 0 && (
           <div className="ff-mono text-xs flex items-center gap-2 mt-1" style={{ color: 'var(--ink-faint)' }}>
             <Snowflake size={12} strokeWidth={1.5} style={{ color: 'var(--ocean)' }} />
-            <span>fría · {fria.emoji} {fria.nombre}</span>
+            <span>{frias.length === 1 ? 'fría' : 'frías'} · {frias.map(c => `${c.emoji || ''} ${c.nombre}`.trim()).join(' · ')}</span>
           </div>
         )}
       </div>
@@ -3606,9 +3797,12 @@ function SesionCosturero({ cams, señales, onArchiveMision, onEditMision, onAddM
   const [camId, setCamId] = useState(null);
   const [revisadas, setRevisadas] = useState([]);
   const [nuevas, setNuevas] = useState({});
-  const [caliente, setCaliente] = useState('');
-  const [fria, setFria] = useState('');
+  const [calientes, setCalientes] = useState([]);
+  const [frias, setFrias] = useState([]);
   const [notas, setNotas] = useState('');
+  // Una pregunta del banco, la misma toda la semana. Contestarla es opcional:
+  // el costurero es donde se escribe el juego, no un cuestionario.
+  const [pregunta] = useState(() => preguntaDelCosturero());
 
   const cam = cams.find(c => c.id === camId) || null;
 
@@ -3626,7 +3820,19 @@ function SesionCosturero({ cams, señales, onArchiveMision, onEditMision, onAddM
   };
   const terminar = () => {
     sembrar();
-    onClose({ notas: notas.trim(), caliente, fria, completa: true });
+    const conNombre = (ids) => ids
+      .map(id => cams.find(c => c.id === id))
+      .filter(Boolean)
+      .map(c => ({ id: c.id, nombre: c.nombre, emoji: c.emoji }));
+    onClose({
+      notas: notas.trim(),
+      pregunta: pregunta.titulo,
+      // Nombres congelados al escribir: el id de una camiseta donada deja de
+      // resolver, y esta sesión tiene que poder contarse dentro de un año.
+      calientes: conNombre(calientes),
+      frias: conNombre(frias),
+      completa: true,
+    });
   };
 
   const abrir = (id) => { setCamId(id); setPaso('revisar'); };
@@ -3771,13 +3977,28 @@ function SesionCosturero({ cams, señales, onArchiveMision, onEditMision, onAddM
 
     {paso === 'cerrar' && (<div className="fade-up">
       <h2 className="display text-3xl mb-2">La temperatura.</h2>
-      <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>¿Cuál camiseta estuvo caliente esta semana? ¿Cuál estuvo fría?</p>
-      <ChipsCam label="caliente" icon={Flame} cams={cams} value={caliente} onChange={setCaliente} accent="var(--accent)" />
-      <ChipsCam label="fría" icon={Snowflake} cams={cams} value={fria} onChange={setFria} accent="var(--ocean)" />
+      <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>¿Cuáles estuvieron calientes esta semana? ¿Cuáles frías? Pueden ser varias, o ninguna.</p>
+      <ChipsCam label="calientes" icon={Flame} cams={cams} valores={calientes}
+        onToggle={(id) => {
+          // Una camiseta no puede estar caliente y fría la misma semana: si
+          // entra a una lista, sale de la otra.
+          setFrias(frias.filter(x => x !== id));
+          setCalientes(calientes.includes(id) ? calientes.filter(x => x !== id) : [...calientes, id]);
+        }} accent="var(--accent)" />
+      <ChipsCam label="frías" icon={Snowflake} cams={cams} valores={frias}
+        onToggle={(id) => {
+          setCalientes(calientes.filter(x => x !== id));
+          setFrias(frias.includes(id) ? frias.filter(x => x !== id) : [...frias, id]);
+        }} accent="var(--ocean)" />
       <div className="hr-deco mb-5" />
-      {/* La reflexión del costurero es sobre el trabajo y su dirección, no
-          sobre cómo estuvo la semana: eso es de otra silla. */}
-      <label className="smallcaps block mb-3" style={{ color: 'var(--ink-faint)' }}>¿Hacia dónde va este trabajo?</label>
+      {/* "¿Hacia dónde va este trabajo?" se retiró: con veinte camisetas
+          encima nadie sabe a cuál trabajo se refiere, y una pregunta que hay
+          que descifrar antes de contestarla no se contesta. El banco es
+          concreto y la misma pregunta dura toda la semana. */}
+      <label className="smallcaps block mb-3" style={{ color: 'var(--ink-faint)' }}>{pregunta.titulo}</label>
+      {pregunta.ayuda && (
+        <p className="ff-serif italic text-sm mb-3" style={{ color: 'var(--ink-faint)' }}>{pregunta.ayuda}</p>
+      )}
       <textarea value={notas} onChange={e => setNotas(e.target.value)} rows={4} placeholder="…" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
       <div className="flex justify-between mt-8">
         <button onClick={() => setPaso('escoger')} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
@@ -3817,19 +4038,25 @@ function SemanalMisionRow({ m, onArchive, onEdit, onMas, onMenos, onForma }) {
   </div>);
 }
 
-function ChipsCam({ label, icon: Icon, cams, value, onChange, accent }) {
+// Selección múltiple: una semana puede tener varias calientes y varias frías,
+// y obligar a escoger una sola era pedirle al usuario que resumiera de más.
+// `valores` es una lista de ids; tocar una chip la mete o la saca.
+function ChipsCam({ label, icon: Icon, cams, valores, onToggle, accent }) {
   return (<div className="mb-6">
     <label className="smallcaps mb-3 flex items-center gap-2" style={{ color: 'var(--ink-faint)' }}>
       {Icon && <Icon size={12} strokeWidth={1.5} />}{label}
     </label>
     <div className="flex flex-wrap gap-2">
-      {cams.map(c => (
-        <button key={c.id} onClick={() => onChange(value === c.id ? '' : c.id)} className="ff-serif px-3 py-1.5 ring-ink" style={{
-          background: value === c.id ? accent : 'transparent',
-          color: value === c.id ? 'var(--bg)' : 'var(--ink)',
-          border: '1px solid ' + (value === c.id ? accent : 'var(--line)'),
-        }}><span className="mr-1">{c.emoji}</span>{c.nombre}</button>
-      ))}
+      {cams.map(c => {
+        const puesta = valores.includes(c.id);
+        return (
+          <button key={c.id} onClick={() => onToggle(c.id)} className="ff-serif px-3 py-1.5 ring-ink" style={{
+            background: puesta ? accent : 'transparent',
+            color: puesta ? 'var(--bg)' : 'var(--ink)',
+            border: '1px solid ' + (puesta ? accent : 'var(--line)'),
+          }}><span className="mr-1">{c.emoji}</span>{c.nombre}</button>
+        );
+      })}
     </div>
   </div>);
 }
@@ -3863,58 +4090,93 @@ function SesionObservador({ state, ultimaClave, onClose }) {
   // Se calcula una vez al entrar. Si se recalculara en cada render, contestar
   // la pregunta podría cambiar la pregunta.
   const [hallazgo] = useState(() => mirar(state, { ultimaClave }));
-  const [dificil] = useState(() => preguntaDificil());
   const [paso, setPaso] = useState(0);
   const [respuesta, setRespuesta] = useState('');
-  const [honesto, setHonesto] = useState('');
+  const [respuestas, setRespuestas] = useState({});   // titulo -> texto
 
-  const total = hallazgo ? 2 : 1;
-  const terminar = () => onClose({
-    completa: true,
-    hallazgo: hallazgo?.clave ?? null,
-    pregunta: dificil.titulo,
-    honesto: honesto.trim(),
-    // La nota que se lee en la historia junta las dos respuestas sin
-    // interpretarlas: son sus palabras, no un resumen.
-    notas: [
-      hallazgo && respuesta.trim() && `${hallazgo.pregunta} → ${respuesta.trim()}`,
-      honesto.trim() && `${dificil.titulo} → ${honesto.trim()}`,
-    ].filter(Boolean).join(' · '),
-  });
+  // El hallazgo, si lo hay, y después todas las difíciles. No una por mes:
+  // esta es la sesión que se agenda para sentarse un rato, y mostrar una sola
+  // convertía media hora reservada en tres minutos.
+  const pantallas = [
+    ...(hallazgo ? [{ tipo: 'hallazgo' }] : []),
+    ...PREGUNTAS_DIFICILES.map(p => ({ tipo: 'dificil', p })),
+  ];
+  const actual = pantallas[paso];
+  const ultima = paso === pantallas.length - 1;
+
+  const terminar = (respuestasFinales) => {
+    const rs = respuestasFinales || respuestas;
+    const contestadas = Object.entries(rs)
+      .map(([pregunta, texto]) => ({ pregunta, respuesta: texto.trim() }))
+      .filter(r => r.respuesta);
+    onClose({
+      completa: true,
+      hallazgo: hallazgo?.clave ?? null,
+      respuestas: contestadas,
+      // La nota de la historia son sus palabras, sin resumir ni interpretar.
+      notas: contestadas.map(r => `${r.pregunta} → ${r.respuesta}`).join(' · '),
+    });
+  };
+
+  // Guardar lo escrito y seguir. Pasar es exactamente lo mismo sin guardar:
+  // contestar ninguna es una sesión válida, y sin esa salida doce preguntas
+  // serían un formulario.
+  const avanzar = (guardando) => {
+    const rs = guardando && respuesta.trim()
+      ? { ...respuestas, [actual.p.titulo]: respuesta }
+      : respuestas;
+    if (guardando) setRespuestas(rs);
+    setRespuesta('');
+    if (ultima) terminar(rs); else setPaso(paso + 1);
+  };
 
   return (<div className="px-6 pt-8 pb-12 max-w-xl mx-auto fade-up">
     <div className="flex items-center justify-between mb-2">
       <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>{TEXTOS_OBSERVADOR.titulo}</span>
       <button onClick={() => onClose(null)} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Salir"><X size={18} /></button>
     </div>
-    <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{paso + 1} / {total}</div>
+    <div className="ff-mono text-xs mb-10" style={{ color: 'var(--ink-faint)' }}>{paso + 1} / {pantallas.length}</div>
 
-    {paso === 0 && hallazgo && (<div className="fade-up">
+    {actual?.tipo === 'hallazgo' && (<div className="fade-up" key="hallazgo">
       <div className="smallcaps mb-3" style={{ color: 'var(--violeta-luz)' }}>{TEXTOS_OBSERVADOR.etiquetaHallazgo}</div>
       <h1 className="display text-3xl mb-3">{hallazgo.pregunta}</h1>
       <p className="ff-serif mb-8" style={{ color: 'var(--ink-soft)' }}>{hallazgo.cuerpo}</p>
-      <label className="smallcaps block mb-2" style={{ color: 'var(--ink-faint)' }}>{TEXTOS_OBSERVADOR.etiquetaRespuesta}</label>
       <p className="ff-serif italic text-sm mb-3" style={{ color: 'var(--ink-faint)' }}>{TEXTOS_OBSERVADOR.respuestaLibre}</p>
       <textarea value={respuesta} onChange={e => setRespuesta(e.target.value)} rows={4} autoFocus placeholder="…" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
-      <div className="flex justify-end mt-8">
-        <button onClick={() => setPaso(1)} className="ff-serif px-5 py-2 ring-ink" style={{ border: '1px solid var(--ink)' }}>siguiente →</button>
+      <div className="flex justify-between items-center mt-8">
+        <button onClick={() => { const t = respuesta.trim(); setRespuestas(t ? { ...respuestas, [hallazgo.pregunta]: respuesta } : respuestas); setRespuesta(''); setPaso(paso + 1); }}
+          className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>pasar →</button>
+        <button onClick={() => { const t = respuesta.trim(); setRespuestas(t ? { ...respuestas, [hallazgo.pregunta]: respuesta } : respuestas); setRespuesta(''); setPaso(paso + 1); }}
+          className="ff-serif px-5 py-2 ring-ink" style={{ border: '1px solid var(--ink)' }}>siguiente →</button>
       </div>
     </div>)}
 
-    {(paso === 1 || !hallazgo) && (<div className="fade-up">
-      {!hallazgo && (
-        // Sin material, no se fabrica un hallazgo. Se dice y se sigue.
+    {actual?.tipo === 'dificil' && (<div className="fade-up" key={actual.p.titulo}>
+      {paso === 0 && !hallazgo && (
+        // Sin material no se fabrica un hallazgo. Se dice y se sigue.
         <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-faint)' }}>{TEXTOS_OBSERVADOR.sinMaterial.cuerpo}</p>
       )}
-      <h1 className="display text-3xl mb-3">{dificil.titulo}</h1>
-      <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>{dificil.ayuda}</p>
-      <textarea value={honesto} onChange={e => setHonesto(e.target.value)} rows={5} autoFocus placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
-      <div className="flex justify-between mt-8">
-        {hallazgo
-          ? <button onClick={() => setPaso(0)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>← atrás</button>
-          : <div />}
-        <button onClick={terminar} className="ff-serif px-6 py-2 ring-ink" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>{TEXTOS_OBSERVADOR.cerrar}</button>
+      <h1 className="display text-3xl mb-3">{actual.p.titulo}</h1>
+      <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-soft)' }}>{actual.p.ayuda}</p>
+      <textarea value={respuesta} onChange={e => setRespuesta(e.target.value)} rows={5} autoFocus placeholder="(opcional)" className="w-full ff-serif text-base p-3 ring-ink resize-none italic" style={{ border: '1px solid var(--line)', background: 'var(--bg-card)' }} />
+      <div className="flex justify-between items-center mt-8">
+        <button onClick={() => avanzar(false)} className="ff-mono text-xs ring-ink px-3 py-2" style={{ color: 'var(--ink-faint)' }}>
+          {ultima ? 'cerrar sin contestar' : 'pasar →'}
+        </button>
+        <button onClick={() => avanzar(true)} className="ff-serif px-5 py-2 ring-ink"
+          style={ultima ? { background: 'var(--ink)', color: 'var(--bg)' } : { border: '1px solid var(--ink)' }}>
+          {ultima ? TEXTOS_OBSERVADOR.cerrar : 'siguiente →'}
+        </button>
       </div>
+      {/* Salir a mitad de camino sin perder lo ya escrito. La sesión es larga
+          a propósito, pero larga no puede querer decir todo o nada. */}
+      {paso > 0 && (
+        <div className="mt-8 text-center">
+          <button onClick={() => terminar()} className="ff-mono text-xs ring-ink" style={{ color: 'var(--ink-faint)' }}>
+            terminar aquí
+          </button>
+        </div>
+      )}
     </div>)}
   </div>);
 }

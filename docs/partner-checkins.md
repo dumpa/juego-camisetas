@@ -1,6 +1,22 @@
-# Partner por camiseta — plan (sin construir todavía)
+# Partner por camiseta — plan
 
-Estado: **diseño, no implementado.** Este documento existe para no perder el razonamiento entre ahora y cuando se construya.
+Estado: **v1 construida el 16 de agosto de 2026; el resto sigue en diseño.**
+
+## Lo que YA está (v1)
+
+Deliberadamente más chica que el plan de abajo, para poder probarla sin construir maquinaria:
+
+- Campo `partner: { activo, nombre, tipo: null }` en la camiseta (migración v11).
+- Sección «con quién la revisas» en `EditCamiseta`.
+- Botón «revisar con [nombre]» en la ficha, visible solo si hay partner: abre el share sheet con un mensaje fijo — *«Quisiera revisar contigo los avances con la camiseta X»* — y ahí se acaba. El destinatario se escoge en WhatsApp.
+
+## Lo que NO está, y es a propósito
+
+- **Ningún eco** de recordatorio. Todavía no se sabe si el recordatorio hace falta o estorba; se decide después de usarlo.
+- **Ningún evento ni sesión.** El app no registra que mandaste el mensaje.
+- **Ningún reporte de avances.** Es la pieza más delicada del plan (ver el final de este documento) y no se construye hasta saber cómo se siente lo demás.
+
+Lo que sigue es el plan completo, tal como se pensó antes de construir la v1. Sirve para no volver a razonarlo desde cero.
 
 ## Lo que se pidió
 

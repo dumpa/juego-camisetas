@@ -101,7 +101,7 @@ Cada una de estas parece innecesariamente complicada y tiene una razón. **No la
 
 ## Estado
 
-- Esquema `version: 10`. Construido: el clóset (5 ganchos + cerros), lavar la ropa, donar y donar en masa, el motor de ecos, la cita `.ics`.
+- Esquema `version: 11`. Construido: el clóset (5 ganchos + cerros), lavar la ropa, donar y donar en masa, el motor de ecos, la cita `.ics`.
 - **Los tres rituales están construidos en su forma nueva** (15 ago 2026): *escoger la ropa*, *el costurero* y *el observador del observador*. Ver `docs/rituales.md`.
 - No construido: el partner por camiseta, el reporte al partner, el criterio de selección del eco, el onboarding, el manifiesto.
 - `src/AppBackup.jsx` y `src/codec/indexBackup.js` no son la fuente de verdad. Los tests (`npm test`) pasan: round-trip del codec y del estado.

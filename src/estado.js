@@ -11,6 +11,11 @@
 // Regla que no cambia por haberse mudado: las migraciones son acumulativas.
 // Se suma un paso, no se reescriben los anteriores.
 
+// La versión del esquema. Vive aquí y no suelta en tres sitios: migrate la
+// escribe, emptyState la nace y el respaldo la usa para rechazar un archivo
+// de una versión más nueva que este app.
+export const VERSION = 11;
+
 export const STATE_KEY = 'juego-camisetas:state:v1';
 export const INSTALL_KEY = 'juego-camisetas:install-ack:v1';
 // v7: respaldos automáticos. PRE_V7 congela el estado crudo la primera vez
@@ -51,7 +56,7 @@ export function isStandalone() {
 }
 
 export const emptyState = () => ({
-  user_id: 'local', version: 10, created_at: new Date().toISOString(),
+  user_id: 'local', version: VERSION, created_at: new Date().toISOString(),
   camisetas: [], sesiones: [], eventos: [], movimientos: [], visitas: [],
   cerros: [cerroSistema()], ecos: { silencios: {} },
 });
@@ -297,8 +302,120 @@ export function migrate(s) {
     pushEvento(s, { tipo: 'frontera_puesta_diaria' });
     s.camisetas?.forEach(cam => { delete cam.archived_at; });
   }
-  s.version = 10;
+  // v11 — cada camiseta puede tener un partner: una persona con quien se
+  // revisa esa identidad. Solo añade un campo, así que no lleva respaldo.
+  //
+  // El nombre NO viaja en el codec, y no hace falta blindarlo aparte: el
+  // codec exporta por lista blanca, campo por campo. Mientras nadie agregue
+  // 'partner' a esa lista, es estructuralmente imposible que se filtre al
+  // compartir una camiseta.
+  if (s.version < 11) {
+    s.camisetas?.forEach(cam => { if (cam.partner === undefined) cam.partner = null; });
+  }
+  s.version = VERSION;
   return s;
+}
+
+// Reordenar una camiseta dentro de la lista que el usuario está viendo.
+//
+// `entre` son los ids visibles, en su orden. Sin ese dato la operación es
+// ambigua y ya se equivocó una vez: movía ±1 dentro de s.camisetas mientras
+// la pantalla mostraba solo las puestas, así que si el vecino en el array
+// estaba en un gancho o en un cerro, la flecha intercambiaba la camiseta con
+// algo invisible y el clic no hacía nada. Se sentía como un botón muerto.
+//
+// Lo que está fuera de `entre` no se mueve: se intercambian las posiciones
+// reales de la camiseta y de su vecino visible, nada más.
+export function reordenarEntre(s, camId, dir, entre = null) {
+  const lista = (entre && entre.length) ? entre : (s.camisetas || []).map(c => c.id);
+  const pos = lista.indexOf(camId);
+  if (pos === -1) return false;
+  const vecinoId = lista[pos + dir];
+  if (!vecinoId) return false;                    // ya está en la punta
+  const i = s.camisetas.findIndex(c => c.id === camId);
+  const j = s.camisetas.findIndex(c => c.id === vecinoId);
+  if (i === -1 || j === -1) return false;
+  [s.camisetas[i], s.camisetas[j]] = [s.camisetas[j], s.camisetas[i]];
+  return true;
+}
+
+// Mover una camiseta Y dejarla en un sitio concreto de la lista de destino.
+//
+// aplicarMovida decide en qué parte del mueble queda; el orden dentro de las
+// puestas es otra cosa, y es la que faltaba: soltar entre las puestas la
+// mandaba a donde estuviera en el array, que no es donde el dedo la soltó.
+//
+// `ranura` = { id, antes } — sobre qué camiseta cayó y de qué lado de su
+// mitad. Si no hay ranura (se soltó en el vacío de la zona) solo se mueve.
+export function colocarEn(s, camId, destino, ranura = null) {
+  const movio = aplicarMovida(s, camId, destino);
+  if (!ranura || ranura.id === camId) return movio;
+  const i = s.camisetas.findIndex(c => c.id === camId);
+  const j = s.camisetas.findIndex(c => c.id === ranura.id);
+  if (i === -1 || j === -1) return movio;
+  const [mov] = s.camisetas.splice(i, 1);
+  // El índice del vecino pudo correrse al sacar la camiseta de su sitio.
+  const destinoIdx = s.camisetas.findIndex(c => c.id === ranura.id);
+  s.camisetas.splice(ranura.antes ? destinoIdx : destinoIdx + 1, 0, mov);
+  return true;
+}
+
+// ── El respaldo ──────────────────────────────────────────────────────────
+//
+// Sin backend, el respaldo no es una comodidad: es lo único que hay entre el
+// usuario y perderlo todo. El navegador puede desalojar localStorage sin
+// avisar, y aquí nadie tiene una copia en un servidor.
+//
+// Por eso estas dos funciones son puras y viven con las migraciones: lo que
+// se exporta y lo que se acepta al importar es una decisión del modelo de
+// datos, no de una pantalla.
+//
+// Ojo con lo que NO va aquí: nada de recordar respaldar cada tantos días.
+// "Hace rato no respaldas" cuenta ausencias del usuario, que es justo lo
+// prohibido. El camino se hace fácil y visible; el app no insiste.
+export function armarRespaldo(state, ahora = new Date()) {
+  const { _saveError, _storageOk, ...limpio } = state || {};
+  const fecha = ahora.toISOString().slice(0, 10);
+  return {
+    json: JSON.stringify(limpio, null, 2),
+    nombre: `camisetas-${fecha}.json`,
+  };
+}
+
+// Qué se acepta al importar. Se es estricto a propósito: pisar el estado con
+// algo que no es un respaldo es la única forma de perderlo todo de un solo
+// gesto, y el usuario no tiene deshacer.
+//
+// Un respaldo de una versión MÁS NUEVA que el app se rechaza. Migrate solo
+// sabe subir de versión; bajar es inventar, y lo que inventaría es el juego
+// entero de alguien.
+export function revisarRespaldo(texto, versionApp = VERSION) {
+  let parsed;
+  try {
+    parsed = JSON.parse(texto);
+  } catch {
+    return { ok: false, error: 'Eso no parece un respaldo: el archivo está incompleto o no es el que era.' };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: 'Eso no parece un respaldo del juego.' };
+  }
+  if (!Array.isArray(parsed.camisetas)) {
+    return { ok: false, error: 'Ese archivo no tiene camisetas adentro. ¿Será otro archivo?' };
+  }
+  const v = parsed.version || 0;
+  if (v > versionApp) {
+    return { ok: false, error: `Ese respaldo lo hizo una versión más nueva del juego (v${v}). Actualiza el app antes de restaurarlo.` };
+  }
+  return {
+    ok: true,
+    estado: parsed,
+    resumen: {
+      camisetas: parsed.camisetas.length,
+      sesiones: (parsed.sesiones || []).length,
+      version: v,
+      desde: parsed.created_at || null,
+    },
+  };
 }
 
 // Una misión está "en juego" si vive en los buckets activos (CamisetaDetail,

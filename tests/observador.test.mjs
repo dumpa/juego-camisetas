@@ -9,7 +9,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mirar, preguntaDificil, PREGUNTAS_DIFICILES } from '../src/observador/index.js';
+import { mirar, preguntaDelCosturero, PREGUNTAS_DIFICILES, PREGUNTAS_COSTURERO } from '../src/observador/index.js';
 
 const DIA = 86400000;
 const HOY = new Date('2026-08-15T12:00:00.000Z');
@@ -166,14 +166,36 @@ test('todo termina en pregunta y nada felicita ni regaña', () => {
   }
 });
 
-test('la pregunta difícil es estable dentro del mes y cambia al siguiente', () => {
-  const a = preguntaDificil(new Date('2026-08-01T09:00:00'));
-  const b = preguntaDificil(new Date('2026-08-28T22:00:00'));
-  const c = preguntaDificil(new Date('2026-09-05T09:00:00'));
-  assert.deepEqual(a, b, 'no cambia si abres el app dos veces el mismo mes');
-  assert.notDeepEqual(a, c);
-  // Y todas son de verdad preguntas abiertas.
-  for (const p of PREGUNTAS_DIFICILES) assert.match(p.titulo, /\?$/);
+test('las difíciles salen todas, y todas son preguntas abiertas', () => {
+  // El observador es la sesión que se agenda para sentarse un rato: mostrar
+  // una sola y esconder el resto convertía media hora en tres minutos. Lo que
+  // las hace soportables es que se pueden pasar, no que sean pocas.
+  assert.ok(PREGUNTAS_DIFICILES.length >= 10, 'la sesión tiene que dar para rato');
+  for (const p of PREGUNTAS_DIFICILES) {
+    assert.match(p.titulo, /\?$/, `no es pregunta: "${p.titulo}"`);
+    assert.ok(p.ayuda && p.ayuda.length > 5, `"${p.titulo}" no tiene ayuda`);
+  }
+  // Ninguna repetida: la lista se muestra entera y una repetición se nota.
+  const titulos = PREGUNTAS_DIFICILES.map(p => p.titulo);
+  assert.equal(new Set(titulos).size, titulos.length);
+});
+
+test('la pregunta del costurero es estable dentro de la semana', () => {
+  const martes = preguntaDelCosturero(new Date('2026-08-18T09:00:00'));
+  const jueves = preguntaDelCosturero(new Date('2026-08-20T22:00:00'));
+  assert.deepEqual(martes, jueves, 'abrir el ritual dos días seguidos no cambia la pregunta');
+  // Y a la semana siguiente es otra.
+  const otra = preguntaDelCosturero(new Date('2026-08-27T09:00:00'));
+  assert.notDeepEqual(martes, otra);
+  for (const p of PREGUNTAS_COSTURERO) assert.match(p.titulo, /\?$/);
+});
+
+test('los dos bancos no se pisan', () => {
+  // El del costurero es concreto y sobre el trabajo de la semana; el del
+  // observador es sobre para qué. Si una pregunta está en los dos, una de las
+  // dos sillas está haciendo el trabajo de la otra.
+  const dificiles = new Set(PREGUNTAS_DIFICILES.map(p => p.titulo));
+  for (const p of PREGUNTAS_COSTURERO) assert.ok(!dificiles.has(p.titulo), `repetida: ${p.titulo}`);
 });
 
 test('un estado roto no tumba la sesión', () => {
