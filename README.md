@@ -88,11 +88,11 @@ En Android: Chrome → menú → "Instalar app" (o equivalente). Funciona igual.
 - **No hay backend.** Los datos viven en el navegador del usuario (`localStorage`). Si el usuario borra cookies del sitio, pierde sus datos. Por eso la app tiene un export/import de JSON en el Diario.
 - **Cambiar de dispositivo:** exportar JSON desde un lado, pegarlo en el otro. Es la forma soberana.
 - **El service worker** cachea la app para offline. Si actualizas y deployas, la nueva versión se carga la próxima vez que el usuario abre la app conectado.
-- **Catálogo de camisetas:** está en `src/App.jsx`, constante `CATALOGO`. Para añadir más camisetas, edita esa constante y haz commit + push.
+- **Catálogo de camisetas:** está en `src/catalogo.js`, constante `CATALOGO`. Para añadir más camisetas, edita ese archivo y haz commit + push.
 
 ## Trabajo de autor (no de programador)
 
-Cuando quieras añadir camisetas al catálogo, no necesitas tocar más que el array `CATALOGO` en `App.jsx`. Cada entrada tiene:
+Cuando quieras añadir camisetas al catálogo, no necesitas tocar más que el array `CATALOGO` en `src/catalogo.js`. Cada entrada tiene:
 
 ```js
 {

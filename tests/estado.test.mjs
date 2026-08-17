@@ -440,3 +440,19 @@ test('el nombre del partner NUNCA sale en el codec', async () => {
   assert.doesNotMatch(texto, /Camila/, 'el nombre del partner viajó en el molde');
   assert.doesNotMatch(texto, /partner/i);
 });
+
+test('un molde manipulado no puede meterle un partner a quien lo recibe', async () => {
+  // La otra mitad de la promesa anterior. Desde que se pregunta por el partner
+  // al importar, el nombre lo pone quien recibe y nadie más: si un JSON
+  // llegara con un `partner` escrito a mano, el decoder tiene que ignorarlo.
+  // Si no, quien te comparte una camiseta te elige el partner.
+  const { decodeJSONToCamiseta } = await import('../src/codec/index.js');
+  const molde = JSON.stringify({
+    _t: 'camiseta-molde', nombre: 'Capitán', emoji: '🧭', creador_id: 'otro',
+    misiones: [], milestones: [],
+    partner: { activo: true, nombre: 'Camila', tipo: null },
+  });
+  const { camiseta } = decodeJSONToCamiseta(molde);
+  assert.equal(camiseta.partner, undefined, 'el molde le metió un partner a quien recibe');
+  assert.doesNotMatch(JSON.stringify(camiseta), /Camila/);
+});

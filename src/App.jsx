@@ -7,6 +7,7 @@ import { TEXTOS } from './ecos/textos.js';
 import { construirICS, entregarCita, proximaCita, DURACION, aInputLocal, deInputLocal } from './cita.js';
 import { mirar, preguntaDelCosturero, PREGUNTAS_DIFICILES } from './observador/index.js';
 import { TEXTOS_OBSERVADOR } from './observador/textos.js';
+import { CATALOGO } from './catalogo.js';
 
 import {
   STATE_KEY,
@@ -54,88 +55,6 @@ const TONOS = [
 const colorTono = (id) => TONOS.find(t => t.id === id)?.color || 'var(--ink-faint)';
 const SUGERENCIAS_EMOJI = ['🧭','⚓','🎭','🌱','🪶','🔥','🗺️','🦴','🪞','🎯','🪐','🪨','🌊','🏛️','📜','🜃'];
 
-// Catálogo curado por Dumpa. Estas son las camisetas pre-establecidas que un nuevo
-// usuario puede "comprar" para empezar a jugar sin tener que construir desde cero.
-// Las dos primeras (Mi primera camiseta y Curiosidad) son gratis: el regalo de bienvenida.
-const CATALOGO = [
-  {
-    id: 'mi-primera-camiseta-v1',
-    nombre: 'Mi primera camiseta',
-    emoji: '👕',
-    esencia: 'Aprende a jugar, jugando.',
-    arco: { de: 'espectador', a: 'jugador' },
-    precio: 0,
-    creador_id: 'dumpa',
-    misiones: [
-      { nombre: 'Tiende tu cama',                        forma: 'recurrente', tonos: [],                          puntos_base: 2 },
-      { nombre: 'Lava un plato (u ordena un cajón)',     forma: 'facil',      tonos: [],                          puntos_base: 1 },
-      { nombre: 'Cierra tu día',                         forma: 'recurrente', tonos: [],                          puntos_base: 2 },
-      { nombre: 'Dile a alguien "te quiero"',            forma: 'dificil',    tonos: ['emocional'],               puntos_base: 3 },
-      { nombre: 'Crea tu primera camiseta',              forma: 'dificil',    tonos: ['creativa'],                puntos_base: 3 },
-      { nombre: 'Invita a alguien a crear la suya',      forma: 'dificil',    tonos: ['emocional','estrategica'], puntos_base: 3 },
-    ],
-    milestones: [
-      { nombre: 'Tendiste la cama toda la semana', regalo: 'Cómprate un chocolate (o regálate un paseo) 🍫' },
-      { nombre: 'Llegaste a 3 camisetas',          regalo: 'Ve a cine 🎬' },
-    ],
-  },
-  {
-    id: 'curiosidad-v1',
-    nombre: 'Curiosidad',
-    emoji: '🌱',
-    esencia: 'Con la curiosidad descubro el mundo.',
-    arco: null,
-    precio: 0,
-    creador_id: 'dumpa',
-    misiones: [
-      { nombre: 'Saltar sobre algo',                       forma: 'facil',     tonos: ['fisica'],            puntos_base: 1 },
-      { nombre: 'Pasar por debajo de algo',                forma: 'facil',     tonos: ['fisica'],            puntos_base: 1 },
-      { nombre: 'Encontrar un portal',                     forma: 'dificil',      tonos: ['creativa','emocional'], puntos_base: 3 },
-      { nombre: 'Meterse a un río o lago',                 forma: 'dificil',      tonos: ['fisica','emocional'], puntos_base: 3 },
-      { nombre: 'Probar algo que nunca has probado',       forma: 'dificil',      tonos: ['creativa'],          puntos_base: 2 },
-      { nombre: 'Una cita con la curiosidad',              forma: 'recurrente', tonos: ['emocional','creativa'], puntos_base: 2 },
-    ],
-    milestones: [],
-  },
-  {
-    id: 'creatividad-v1',
-    nombre: 'Creatividad',
-    emoji: '🔥',
-    esencia: 'Con la creatividad cambio el mundo.',
-    arco: null,
-    precio: 15,
-    creador_id: 'dumpa',
-    misiones: [
-      { nombre: 'Hacer algo y dárselo a alguien',          forma: 'dificil',      tonos: ['creativa','emocional'], puntos_base: 3 },
-      { nombre: 'Combinar dos cosas que no van juntas',    forma: 'facil',     tonos: ['creativa'],          puntos_base: 1 },
-      { nombre: 'Crear algo efímero (menos de un día)',    forma: 'dificil',      tonos: ['creativa'],          puntos_base: 2 },
-      { nombre: 'Cambiar algo de tu entorno',              forma: 'facil',     tonos: ['creativa'],          puntos_base: 1 },
-      { nombre: 'Solución absurda primero',                forma: 'recurrente', tonos: ['creativa','estrategica'], puntos_base: 2 },
-      { nombre: 'Hacer algo sin ninguna utilidad',         forma: 'recurrente', tonos: ['creativa'],          puntos_base: 2 },
-    ],
-    milestones: [],
-  },
-  {
-    id: 'sueno-v1',
-    nombre: 'Sueño',
-    emoji: '🌙',
-    esencia: 'Consciente con el sueño.',
-    arco: { de: 'Acostarse', a: 'Descanso real' },
-    precio: 100,
-    creador_id: 'dumpa',
-    misiones: [
-      { nombre: 'Dejar el celular fuera del cuarto',     forma: 'recurrente', tonos: [],                       puntos_base: 2 },
-      { nombre: 'La cama solo para dormir',              forma: 'recurrente', tonos: [],                       puntos_base: 2 },
-      { nombre: 'Dejar pantallas una hora antes',        forma: 'recurrente', tonos: [],                       puntos_base: 2 },
-      { nombre: 'Definir horario de sueño',              forma: 'facil',      tonos: ['estrategica'],          puntos_base: 1 },
-      { nombre: 'No tomar café después de las 5pm',      forma: 'recurrente', tonos: ['fisica','estrategica'], puntos_base: 2 },
-      { nombre: 'Hacer los 10k pasos',                   forma: 'recurrente', tonos: ['fisica'],               puntos_base: 2 },
-    ],
-    milestones: [
-      { nombre: '8 horas de buen sueño', regalo: 'Gelato 🍧' },
-    ],
-  },
-];
 
 function multiplicador(m) {
   const now = Date.now();
@@ -268,11 +187,13 @@ export default function App() {
     s.camisetas.push({ id, ...data, creador_id: s.user_id, origen: 'propia', origen_camiseta_id: null, precio: null, created_at: nowISO(), ubicacion: PUESTA(), misiones: [], milestones: [] });
     pushEv(s, { tipo: 'camiseta_creada', cam_id: id, nombre: data.nombre, emoji: data.emoji, esencia: data.esencia ?? '', arco: data.arco ?? null });
   });
-  const recibirCamiseta = (molde) => {
+  const recibirCamiseta = (molde, partner = null) => {
     // molde is the decoded camiseta object from decodeImageToCamiseta (mode='molde').
     // Estado se transmite en cero: misiones empiezan activas sin completions,
     // milestones pendientes. Preservamos creador_id original y atamos origen_camiseta_id
     // al id del molde recibido para trazar la procedencia.
+    // El partner NO viene en el molde —el codec no lo exporta nunca— sino de
+    // quien recibe, que escribe el nombre que quiera al momento de importar.
     let newId = null;
     update(s => {
       const camId = uid();
@@ -288,6 +209,7 @@ export default function App() {
         origen: 'recibida',
         origen_camiseta_id: molde.id || null,
         precio: null,
+        partner,
         created_at: nowISO(),
         ubicacion: PUESTA(),
         misiones: (molde.misiones || []).map(m => ({
@@ -655,8 +577,8 @@ export default function App() {
   if (showImport) {
     return <Frame><ImportSheet
       onClose={() => setShowImport(false)}
-      onImport={(molde) => {
-        const id = recibirCamiseta(molde);
+      onImport={(molde, partner) => {
+        const id = recibirCamiseta(molde, partner);
         setShowImport(false);
         if (id) setOpenCam(id);
       }} /></Frame>;
@@ -1352,19 +1274,23 @@ function CreateCamiseta({ onDone, onCancel, canCancel }) {
   const [esencia, setEsencia] = useState('');
   const [arcoDe, setArcoDe] = useState('');
   const [arcoA, setArcoA] = useState('');
+  const [partner, setPartner] = useState('');
   const next = () => setStep(s => s + 1);
   const back = () => step === 0 ? (canCancel && onCancel?.()) : setStep(s => s - 1);
   const submit = () => onDone({
     nombre: nombre.trim(), emoji: emoji.trim() || '◇',
     esencia: esencia.trim(),
     arco: (arcoDe.trim() && arcoA.trim()) ? { de: arcoDe.trim(), a: arcoA.trim() } : null,
+    // Misma forma y misma regla que en EditCamiseta: el nombre se queda en
+    // este teléfono y no viaja en el codec.
+    partner: partner.trim() ? { activo: true, nombre: partner.trim(), tipo: null } : null,
   });
   return (<div className="min-h-screen flex flex-col px-6 pt-6 pb-10 max-w-xl mx-auto">
     <div className="flex items-center justify-between mb-12">
       <button onClick={back} className="ff-mono text-xs ring-ink p-2 -ml-2" style={{ color: 'var(--ink-faint)' }}>
         {step === 0 ? (canCancel ? '← cancelar' : '') : '← atrás'}
       </button>
-      <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{step + 1} / 4</span>
+      <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{step + 1} / 5</span>
     </div>
     {step === 0 && (<div className="fade-up flex-1 flex flex-col">
       <div className="smallcaps mb-4" style={{ color: 'var(--ink-faint)' }}>Paso uno</div>
@@ -1410,6 +1336,21 @@ function CreateCamiseta({ onDone, onCancel, canCancel }) {
         <span className="ff-mono text-xs w-8" style={{ color: 'var(--ink-faint)' }}>a</span>
         <input value={arcoA} onChange={e => setArcoA(e.target.value)} placeholder="Yachtmaster Offshore" className="ff-serif text-lg flex-1 pb-1 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
       </div>
+      <div className="flex-1" />
+      <button onClick={next} className="self-end mt-8 ff-serif px-6 py-2 ring-ink" style={{ border: '1px solid var(--ink)' }}>siguiente →</button>
+    </div>)}
+    {/* El partner llega hasta aquí y no más: el app guarda un nombre para que
+        el usuario sepa a quién escribirle, y nada más. No hay rol asignado,
+        no se le notifica a nadie, y el nombre no sale de este teléfono. */}
+    {step === 4 && (<div className="fade-up flex-1 flex flex-col">
+      <div className="smallcaps mb-4" style={{ color: 'var(--ink-faint)' }}>Paso cinco · opcional</div>
+      <h2 className="display text-3xl md:text-4xl mb-2">¿Con quién la revisas?</h2>
+      <p className="ff-serif text-sm italic mb-8" style={{ color: 'var(--ink-soft)' }}>Un nombre, si hay alguien. Puedes dejarlo vacío.</p>
+      <input value={partner} onChange={e => setPartner(e.target.value)} placeholder="un nombre"
+        className="ff-serif text-lg pb-2 ring-ink" style={{ borderBottom: '1px solid var(--line)' }} />
+      <p className="ff-serif text-sm mt-3" style={{ color: 'var(--ink-faint)' }}>
+        Solo para ti: se queda en este teléfono y no viaja cuando compartes la camiseta. El app no sabe quién es ni le escribe.
+      </p>
       <div className="flex-1" />
       <div className="flex justify-between items-center mt-8">
         <div className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>
@@ -1848,6 +1789,57 @@ function FilaCamiseta({ cam, agarrar, onOpen, atenuada }) {
   </div>);
 }
 
+// ── Cómo llega una camiseta al clóset ────────────────────────────────────
+//
+// Hay tres formas de tener una camiseta, no una principal y dos accesorias:
+// crearla, comprarla, recibirla. En el header del clóset no caben tres
+// nombres en un teléfono, y sin nombre las dos últimas eran íconos mudos
+// (una bandeja y un "+" idénticos). Así que el header lleva una sola puerta
+// y los tres verbos viven aquí, al mismo nivel y todos nombrados.
+//
+// El orden no es el de la bienvenida y es a propósito: allá comprar va
+// primero, porque quien llega no tiene puntos ni sabe todavía qué es una
+// camiseta y el catálogo le enseña. Aquí ya está jugando, y crear es lo que
+// más va a hacer.
+function NuevaCamisetaSheet({ puntos, onCrear, onComprar, onRecibir, onClose }) {
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const vias = [
+    { titulo: 'Crearla',   cuerpo: 'Desde cero. Tú le pones el nombre, la esencia y las misiones.', onClick: onCrear },
+    { titulo: 'Comprarla', cuerpo: 'Del catálogo. Vienen con sus misiones puestas.', onClick: onComprar,
+      extra: <span className="ff-mono text-xs" style={{ color: 'var(--gold)' }}>{round1(puntos)} pts</span> },
+    { titulo: 'Recibirla', cuerpo: 'De alguien más, desde una imagen o un JSON.', onClick: onRecibir },
+  ];
+
+  return (
+    <Capa><div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto fade-up"
+      style={{ background: 'rgba(28, 24, 19, 0.55)' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md my-auto max-h-[90vh] overflow-y-auto"
+        style={{ background: 'var(--bg)', border: '1px solid var(--line)' }}>
+        <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '1px solid var(--line-soft)' }}>
+          <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Una camiseta nueva</span>
+          <button onClick={onClose} className="ring-ink p-1" aria-label="Cerrar"><X size={16} style={{ color: 'var(--ink-faint)' }} /></button>
+        </div>
+        {vias.map((v, i) => (
+          <button key={v.titulo} onClick={v.onClick}
+            className="block w-full text-left px-5 py-4 ring-ink"
+            style={i < vias.length - 1 ? { borderBottom: '1px solid var(--line-soft)' } : undefined}>
+            <div className="flex items-baseline justify-between gap-3 mb-1">
+              <span className="ff-serif text-lg" style={{ color: 'var(--ink)' }}>{v.titulo}</span>
+              {v.extra}
+            </div>
+            <span className="ff-serif italic text-sm" style={{ color: 'var(--ink-soft)' }}>{v.cuerpo}</span>
+          </button>
+        ))}
+      </div>
+    </div></Capa>
+  );
+}
+
 function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCatalogo, onImport,
                         onReorder, onMover, onLavar, onCrearCerro, onRenombrarCerro, onBorrarCerro, onDonarCerro, onDoblar }) {
   // Los cerros arrancan abiertos: un cerro sirve para saber qué hay dentro.
@@ -1858,6 +1850,7 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
   const [renombrando, setRenombrando] = useState(null);
   const [borrando, setBorrando] = useState(null);
   const [donando, setDonando] = useState(null);
+  const [nueva, setNueva] = useState(false);
 
 
   const { agarrar, fantasma, zona, arrastrando } = useArrastre(
@@ -1886,13 +1879,20 @@ function CamisetasView({ cams, cerros, movimientos, onOpen, onCreate, onOpenCata
   return (<div className="fade-up">
     {fantasma}
 
+    {nueva && <NuevaCamisetaSheet
+      puntos={puntosTotales(movimientos)}
+      onCrear={() => { setNueva(false); onCreate(); }}
+      onComprar={() => { setNueva(false); onOpenCatalogo(); }}
+      onRecibir={() => { setNueva(false); onImport(); }}
+      onClose={() => setNueva(false)} />}
+
     <div className="flex items-baseline justify-between mb-6">
       <p className="ff-serif italic text-lg" style={{ color: 'var(--ink-soft)' }}>Tu clóset.</p>
-      <div className="flex gap-1">
-        <button onClick={onOpenCatalogo} className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)', border: '1px solid var(--line)' }}>catálogo</button>
-        <button onClick={onImport} className="ring-ink p-2" style={{ color: 'var(--ink-soft)' }} aria-label="Recibir camiseta"><Inbox size={20} strokeWidth={1.5} /></button>
-        <button onClick={onCreate} className="ring-ink p-2" style={{ color: 'var(--ink-soft)' }} aria-label="Crear camiseta"><Plus size={20} strokeWidth={1.5} /></button>
-      </div>
+      <button onClick={() => setNueva(true)}
+        className="ring-ink ff-serif text-base py-1.5 px-4 flex items-center gap-1.5 shrink-0"
+        style={{ background: 'var(--ink)', color: 'var(--bg)' }}>
+        <Plus size={16} strokeWidth={1.5} /><span>nueva camiseta</span>
+      </button>
     </div>
 
     {/* ── Puestas ── van arriba: son las importantes. Sin límite, a propósito;
@@ -2709,6 +2709,7 @@ function ImportSheet({ onClose, onImport }) {
   const [error, setError] = useState(null);
   const [previewSrc, setPreviewSrc] = useState(null);
   const [pasted, setPasted] = useState('');
+  const [partner, setPartner] = useState('');
   const inputRef = useRef(null);
 
   // Cleanup blob URL on unmount or change
@@ -2872,8 +2873,24 @@ function ImportSheet({ onClose, onImport }) {
           <img src={previewSrc} alt={`Diseño de ${decoded.nombre}`} style={{ width: '100%', height: 'auto', display: 'block' }} />
         </div>
       )}
+      {/* Se pregunta aquí para que ponerle partner a una camiseta recibida no
+          exija entrar después a editarla. Es anotar un nombre y nada más: no
+          se sugiere ninguno —quien te pasó la camiseta no tiene por qué ser
+          con quien la revisas— y el nombre no vuelve a salir de este teléfono. */}
+      <div className="mb-5">
+        <div className="smallcaps mb-2" style={{ color: 'var(--ink-faint)' }}>
+          con quién la revisas <span className="lowercase tracking-normal opacity-60">(opcional)</span>
+        </div>
+        <input value={partner} onChange={e => setPartner(e.target.value)}
+          placeholder="un nombre"
+          className="w-full ff-serif text-lg pb-2 ring-ink"
+          style={{ borderBottom: '1px solid var(--line)' }} />
+        <p className="ff-serif text-sm mt-2" style={{ color: 'var(--ink-faint)' }}>
+          Solo para ti: se queda en este teléfono y no viaja cuando compartes la camiseta. El app no sabe quién es ni le escribe.
+        </p>
+      </div>
       <div className="space-y-2 mb-3">
-        <button onClick={() => onImport(decoded)}
+        <button onClick={() => onImport(decoded, partner.trim() ? { activo: true, nombre: partner.trim(), tipo: null } : null)}
           className="w-full ring-ink ff-serif text-base py-3 px-4"
           style={{ background: 'var(--ink)', color: 'var(--bg)' }}>
           Agregarla a mi colección
@@ -3397,6 +3414,18 @@ function Heatmap({ state }) {
   </div>);
 }
 
+// La historia crece sin techo y debajo de ella vive la puerta del respaldo,
+// que sin backend es lo único que hay entre el usuario y perderlo todo. Así
+// que la historia se pliega: los últimos días a la vista, lo demás en semanas
+// que se abren si se quieren. Semana de lunes a domingo.
+const DIAS_A_LA_VISTA = 3;
+function inicioDeSemana(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));   // getDay(): domingo = 0
+  return x;
+}
+
 function Historia({ state }) {
   const cams = state.camisetas;
   const lookupCam = (id) => cams.find(c => c.id === id);
@@ -3410,6 +3439,8 @@ function Historia({ state }) {
     { id: 'milestones', label: 'hitos',     match: (e) => e.tipo.startsWith('milestone_') },
   ];
   const [filter, setFilter] = useState(null);
+  // null = todavía nadie tocó nada, vale el default. Un Set = lo que el usuario abrió.
+  const [abiertas, setAbiertas] = useState(null);
 
   const allEvents = (state.eventos || []).filter(e => !TIPOS_SILENCIOSOS.has(e.tipo)).reverse();
   if (allEvents.length === 0) return <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Aún no hay nada que contar. La historia empieza con la primera misión.</p>;
@@ -3429,6 +3460,49 @@ function Historia({ state }) {
   });
   const today = new Date().toDateString();
   const yesterday = new Date(Date.now() - DAY).toDateString();
+
+  // Los días, repartidos en semanas. `filtered` viene del más nuevo al más
+  // viejo y Object.entries conserva ese orden, así que las semanas salen ya
+  // ordenadas sin tener que ordenarlas.
+  const semanas = [];
+  Object.entries(grupos).forEach(([day, evs]) => {
+    const inicio = inicioDeSemana(new Date(evs[0].ts));
+    const key = inicio.toDateString();
+    let s = semanas.find(w => w.key === key);
+    if (!s) { s = { key, inicio, dias: [] }; semanas.push(s); }
+    s.dias.push([day, evs]);
+  });
+
+  // Al llegar se abren las semanas que hagan falta para juntar unos pocos
+  // días con algo dentro — casi siempre una sola. No se cuenta por semanas
+  // sino por días con eventos, porque una semana puede tener uno solo y
+  // entonces "los últimos días" no sería nada.
+  const abiertasPorDefecto = new Set();
+  let diasALaVista = 0;
+  for (const s of semanas) {
+    if (diasALaVista >= DIAS_A_LA_VISTA) break;
+    abiertasPorDefecto.add(s.key);
+    diasALaVista += s.dias.length;
+  }
+  const abiertasAhora = abiertas ?? abiertasPorDefecto;
+  const toggleSemana = (key) => {
+    const n = new Set(abiertasAhora);
+    n.has(key) ? n.delete(key) : n.add(key);
+    setAbiertas(n);
+  };
+  const todasAbiertas = semanas.length > 0 && semanas.every(s => abiertasAhora.has(s.key));
+
+  const etiquetaSemana = (s) => {
+    if (s.key === inicioDeSemana(new Date()).toDateString()) return 'esta semana';
+    if (s.key === inicioDeSemana(new Date(Date.now() - 7 * DAY)).toDateString()) return 'la semana pasada';
+    const fin = new Date(s.inicio);
+    fin.setDate(fin.getDate() + 6);
+    const mes = (d) => d.toLocaleDateString('es-ES', { month: 'short' }).replace('.', '');
+    return mes(s.inicio) === mes(fin)
+      ? `${s.inicio.getDate()}–${fin.getDate()} de ${mes(fin)}`
+      : `${s.inicio.getDate()} de ${mes(s.inicio)} – ${fin.getDate()} de ${mes(fin)}`;
+  };
+
   return (<div>
     <div className="flex flex-wrap gap-1.5 mb-5">
       <button onClick={() => setFilter(null)}
@@ -3450,23 +3524,52 @@ function Historia({ state }) {
     </div>
     {filtered.length === 0 ? (
       <p className="ff-serif italic text-sm" style={{ color: 'var(--ink-faint)' }}>Nada en esta categoría todavía.</p>
-    ) : (
-      <div className="space-y-6">
-        {Object.entries(grupos).map(([day, evs]) => {
-          const date = new Date(evs[0].ts);
-          let label;
-          if (day === today) label = 'hoy';
-          else if (day === yesterday) label = 'ayer';
-          else label = date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' });
-          return (<div key={day}>
-            <div className="ff-mono text-xs mb-2" style={{ color: 'var(--ink-faint)' }}>{label}</div>
-            <div className="space-y-1.5 pl-1" style={{ borderLeft: '1px solid var(--line-soft)' }}>
-              {evs.map(e => <EventoItem key={e.id} e={e} cam={e.cam_id ? lookupCam(e.cam_id) : null} lookupCam={lookupCam} />)}
-            </div>
+    ) : (<>
+      {semanas.length > 1 && (
+        <div className="flex justify-end mb-2">
+          <button onClick={() => setAbiertas(todasAbiertas ? new Set() : new Set(semanas.map(s => s.key)))}
+            className="ring-ink ff-mono text-xs py-1 px-2" style={{ color: 'var(--ink-faint)' }}>
+            {todasAbiertas ? 'contraer todo' : 'ver todo'}
+          </button>
+        </div>
+      )}
+      <div>
+        {semanas.map(s => {
+          const abierta = abiertasAhora.has(s.key);
+          const nEventos = s.dias.reduce((a, [, evs]) => a + evs.length, 0);
+          return (<div key={s.key} style={{ borderTop: '1px solid var(--line-soft)' }}>
+            <button onClick={() => toggleSemana(s.key)} aria-expanded={abierta}
+              className="flex items-center gap-2 w-full text-left ring-ink py-2">
+              {abierta
+                ? <ChevronDown size={12} style={{ color: 'var(--ink-faint)' }} />
+                : <ChevronRight size={12} style={{ color: 'var(--ink-faint)' }} />}
+              <span className="smallcaps" style={{ color: abierta ? 'var(--ink-soft)' : 'var(--ink-faint)' }}>
+                {etiquetaSemana(s)}
+              </span>
+              <span className="flex-1" />
+              <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>{nEventos}</span>
+            </button>
+            {abierta && (
+              <div className="space-y-6 mb-5 mt-1">
+                {s.dias.map(([day, evs]) => {
+                  const date = new Date(evs[0].ts);
+                  let label;
+                  if (day === today) label = 'hoy';
+                  else if (day === yesterday) label = 'ayer';
+                  else label = date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' });
+                  return (<div key={day}>
+                    <div className="ff-mono text-xs mb-2" style={{ color: 'var(--ink-faint)' }}>{label}</div>
+                    <div className="space-y-1.5 pl-1" style={{ borderLeft: '1px solid var(--line-soft)' }}>
+                      {evs.map(e => <EventoItem key={e.id} e={e} cam={e.cam_id ? lookupCam(e.cam_id) : null} lookupCam={lookupCam} />)}
+                    </div>
+                  </div>);
+                })}
+              </div>
+            )}
           </div>);
         })}
       </div>
-    )}
+    </>)}
   </div>);
 }
 

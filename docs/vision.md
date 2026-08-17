@@ -44,4 +44,4 @@ Sigue en pie como proyecto aparte (carpeta `libro/`, fuera de este repo).
 
 ## Nota sobre el catálogo
 
-El doc original listaba 5 camisetas activas de ejemplo (Capitán, Esposo, Millonario, Políglota, Atleta) atadas a la vida del autor. Esas nunca fueron el catálogo público del app — el catálogo real (`CATALOGO` en `src/App.jsx`) es genérico y universal ("Mi primera camiseta", Curiosidad, Creatividad, Sueño). Las camisetas personales del doc viven como datos del usuario (su propio backup), no como código.
+El doc original listaba 5 camisetas activas de ejemplo (Capitán, Esposo, Millonario, Políglota, Atleta) atadas a la vida del autor. Esas nunca fueron el catálogo público del app — el catálogo real (`CATALOGO` en `src/catalogo.js`) es genérico y universal ("Mi primera camiseta", Curiosidad, Creatividad, Sueño). Las camisetas personales del doc viven como datos del usuario (su propio backup), no como código.
