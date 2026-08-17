@@ -16,6 +16,7 @@ Este archivo dice cómo está hecho el repo. **Por qué está hecho así vive en
 - **`docs/decisiones.md`** — qué ya se pensó y se cerró, con fecha y razón. Consultarlo antes de proponer un cambio de comportamiento: casi todo lo de ahí tiene una alternativa que parece mejor a primera vista y ya fue descartada.
 - **`docs/vision.md`** — de dónde viene la idea y por qué el modelo de datos es como es.
 - **`docs/partner-checkins.md`** — plan de una función no construida.
+- **`docs/manual.md`** — **no es doctrina: es el manual del usuario.** Explica qué hace cada parte del app para quien juega. Al cambiar algo que el usuario ve (una pestaña, un ritual, un botón, un texto), actualizarlo ahí también.
 
 Si una funcionalidad razonable choca con una regla de `docs/brief.md`, la funcionalidad está mal, no la regla.
 
@@ -36,6 +37,7 @@ No hay linter configurado. Los tests corren sin dependencias, solo con el runner
 - **`src/estado.js`** — la capa de estado: llaves de localStorage, `emptyState`/`loadState`/`saveState`, `migrate()` y `aplicarMovida()` (el único camino por el que una camiseta cambia de sitio). Vive fuera de `App.jsx` para que las migraciones se puedan correr desde Node; es lo que prueba `tests/estado.test.mjs`.
 - **`src/App.jsx`** (~3700 líneas) — el resto de la app: ~40 componentes y los handlers, en un solo archivo. No hay Error Boundary.
 - **`src/codec/index.js`** — codec propio para exportar una "camiseta" como imagen PNG (datos ocultos en la silueta de la camiseta, con Reed-Solomon) o JSON. Dos modos: `molde` (compartir diseño entre usuarios) y `snapshot` (sync personal entre dispositivos). Formatos legacy 0x04/0x05 se siguen leyendo para siempre; el encoder actual solo emite 0x08.
+- **`src/catalogo.js`** — el catálogo curado: las camisetas pre-establecidas que se pueden comprar con puntos. Solo datos; el encabezado del archivo tiene las reglas de edición (por qué el `id` versionado no se cambia a la ligera: queda guardado en `origen_camiseta_id` de cada camiseta comprada).
 - **`src/ecos/`** — motor de "ecos": mensajes contextuales que el app le muestra al usuario según el estado (no son notificaciones ni rachas). `index.js` tiene las fuentes (funciones puras `(state, ctx) -> eco | null`), `textos.js` los textos. También vive ahí `calcularSeñales`, lo que el costurero muestra de cada camiseta, porque obedece la misma regla: el app habla de identidades, nunca de asistencia.
 - **`src/observador/`** — las comprobaciones del ritual mensual, mismo patrón que los ecos: funciones puras que devuelven un hallazgo o null, se calculan todas y **se presenta una sola**, convertida en pregunta. Nunca un tablero. La lista de lo que puede y no puede mirar está en `docs/rituales.md` §5 y la protege `tests/observador.test.mjs`.
 - **`src/cita.js`** — genera archivos `.ics` para que el usuario agende rituales en su calendario del teléfono. Deliberadamente sin recurrencia ni seguimiento (ver comentario al inicio del archivo).
