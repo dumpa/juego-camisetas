@@ -3893,7 +3893,9 @@ function EscogerLaRopa({ cams, onClose }) {
 // abandona a la mitad. Ahora se entra escogiendo cuál revisar y al terminar
 // se puede revisar otra. Uno siempre escoge la camiseta viva, así que la
 // lista muestra cuáles no se tocan hace rato y cuáles se quedaron sin nada
-// que hacer — sin forzar a nadie: que escoja informado.
+// que hacer — sin forzar a nadie: que escoja informado. La lista va en dos
+// grupos, lo puesto hoy primero y el clóset debajo, porque reconocer el
+// propio día es más barato que leer veinte nombres en desorden.
 function SesionCosturero({ cams, señales, onArchiveMision, onEditMision, onAddMision,
                            onAjustarDificultad, onCambiarForma, onToggleMilestone, onClose }) {
   const [paso, setPaso] = useState('escoger');   // escoger | revisar | cerrar
@@ -3959,32 +3961,47 @@ function SesionCosturero({ cams, señales, onArchiveMision, onEditMision, onAddM
       {cams.length === 0 && (
         <p className="ff-serif italic mb-8" style={{ color: 'var(--ink-faint)' }}>Todavía no hay camisetas que coser.</p>
       )}
+      {/* Dos grupos, no una lista plana: lo primero que uno reconoce al entrar
+          es lo que trae puesto hoy, y por ahí arranca a coser. Pero el resto
+          del clóset queda justo abajo, visible y a un clic — el costurero
+          tiene que poder verlo entero (la frontera de v10 en
+          docs/rituales-construido.md: ya se rompió una vez por mostrar solo
+          lo puesto), así que este segundo grupo no se pliega ni se esconde
+          detrás de un paso. Es orden, no filtro. */}
       <div className="mb-8">
-        {cams.map(c => {
-          const s = señales[c.id] || {};
-          const ya = revisadas.includes(c.id);
-          return (
-            <button key={c.id} onClick={() => abrir(c.id)}
-              className="flex items-center gap-3 py-3 w-full text-left ring-ink"
-              style={{ borderBottom: '1px solid var(--line-soft)' }}>
-              <span className="text-xl" style={{ opacity: ya ? 0.4 : 1 }}>{c.emoji}</span>
-              <span className="flex-1">
-                <span className="ff-serif text-lg block" style={{ color: ya ? 'var(--ink-faint)' : 'var(--ink)' }}>{c.nombre}</span>
-                {/* Las señales hablan de la camiseta, nunca del usuario. "Sin
-                    misiones" es la más útil que produce el sistema: el diario
-                    la marca, el costurero la resuelve. */}
-                {!ya && s.sinMisiones && (
-                  <span className="ff-mono text-xs" style={{ color: 'var(--accent)' }}>sin misiones que hacer</span>
-                )}
-                {!ya && !s.sinMisiones && s.dormida && (
-                  <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>hace rato no se juega</span>
-                )}
-                {ya && <span className="ff-mono text-xs" style={{ color: 'var(--moss)' }}>revisada</span>}
-              </span>
-              <ChevronRight size={16} style={{ color: 'var(--ink-faint)' }} />
-            </button>
-          );
-        })}
+        {[
+          { titulo: 'lo que traigo puesto', lista: cams.filter(estaPuesta) },
+          { titulo: 'en el clóset', lista: cams.filter(c => !estaPuesta(c)) },
+        ].filter(g => g.lista.length > 0).map(g => (
+          <div key={g.titulo} className="mb-6">
+            <span className="smallcaps block mb-1" style={{ color: 'var(--ink-faint)' }}>{g.titulo}</span>
+            {g.lista.map(c => {
+              const s = señales[c.id] || {};
+              const ya = revisadas.includes(c.id);
+              return (
+                <button key={c.id} onClick={() => abrir(c.id)}
+                  className="flex items-center gap-3 py-3 w-full text-left ring-ink"
+                  style={{ borderBottom: '1px solid var(--line-soft)' }}>
+                  <span className="text-xl" style={{ opacity: ya ? 0.4 : 1 }}>{c.emoji}</span>
+                  <span className="flex-1">
+                    <span className="ff-serif text-lg block" style={{ color: ya ? 'var(--ink-faint)' : 'var(--ink)' }}>{c.nombre}</span>
+                    {/* Las señales hablan de la camiseta, nunca del usuario. "Sin
+                        misiones" es la más útil que produce el sistema: el diario
+                        la marca, el costurero la resuelve. */}
+                    {!ya && s.sinMisiones && (
+                      <span className="ff-mono text-xs" style={{ color: 'var(--accent)' }}>sin misiones que hacer</span>
+                    )}
+                    {!ya && !s.sinMisiones && s.dormida && (
+                      <span className="ff-mono text-xs" style={{ color: 'var(--ink-faint)' }}>hace rato no se juega</span>
+                    )}
+                    {ya && <span className="ff-mono text-xs" style={{ color: 'var(--moss)' }}>revisada</span>}
+                  </span>
+                  <ChevronRight size={16} style={{ color: 'var(--ink-faint)' }} />
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
       <div className="flex justify-end">
         <button onClick={() => setPaso('cerrar')} className="ff-serif px-5 py-2 ring-ink" style={{ border: '1px solid var(--ink)' }}>

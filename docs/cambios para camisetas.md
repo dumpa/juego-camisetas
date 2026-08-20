@@ -4,7 +4,6 @@
 
 ## diario
 
-Se puede volver muy largo el diario y el backup queda muy abajo. Me gustaría que ese diario se pudiera reducir estilo acordeon. Ver tal vez al comienzo mis ultimos dias, y si quiero voy expandiendo semanas, con un ver todo, pero que se pueda contraer. 
 
 ## Costurero. 
 
@@ -18,9 +17,15 @@ Se puede volver muy largo el diario y el backup queda muy abajo. Me gustaría qu
 
 ## partner
 
-Debería preguntarse también desde el crear camiseta. Y al meter una camiseta desde cargar imagen o json. preguntar si viene de un partner.
+Una idea que se me ocurre. para el compartir. Sé que ya hemos conversado antes de esto, y seguro tenemos algo en los md. 
+Tal vez al compartir podemos dar algunas opciones pre-establecidas y que las edite:
+- He hecho mi tarea, X veces esta semana
+- he estado activa
+- no la estoy logrando
+- quisera esforzarme más, 
+- podemos hablar de mi camiseta.
 
 ## camisetas
 
-Tenemos 3 botones uno para catalogo, otro para cargar (importar) una camiseta y un tercero para crearla. Ese tercero que es el más importante se pierde, me gustaría darle más importancia. Tal vez un solo botón que una los tres. ¿qué opinas?
+en las misiones recurrentes, cuando llevo varias sale un Xx30d, y arriba sale un 3x, y no estoy seguro si la primera es en el día y la segunda es en el mes. que tendría lógica, o no sé si se esta simplemente siendo redundante que acá sobraría uno de los dos. 
 
