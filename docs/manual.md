@@ -77,7 +77,7 @@ El cambio de turno: entregas el día y dejas listo el siguiente. Son dos pregunt
 Al día siguiente **nadie te pregunta si cumpliste**. Lo de mañana es una propuesta, no un contrato.
 
 **El costurero** · 5–10 min · ~semanal
-El taller. Aquí se poda: archivas misiones que ya no van, ajustas dificultades, siembras nuevas. El app te muestra señales de cada camiseta —«sin misiones», «dormida»— para que sepas dónde mirar, y cierra con una pregunta.
+El taller. Aquí se poda: archivas misiones que ya no van, ajustas dificultades, siembras nuevas. Entras escogiendo cuál remendar: primero **lo que traes puesto**, y debajo **el clóset entero** — todo a un clic, porque coser no es solo lo de hoy. El app te muestra señales de cada camiseta —«sin misiones», «dormida»— para que sepas dónde mirar, y cierra con una pregunta.
 
 **El observador del observador** · 15–25 min · ~mensual
 No mira tu trabajo: mira **cómo estás midiendo tu trabajo**. Revisa el juego mismo y te devuelve **una sola** observación, convertida en pregunta. Nunca un tablero de métricas.
