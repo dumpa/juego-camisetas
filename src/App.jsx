@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Check, X, GripVertical, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home } from 'lucide-react';
+import { Plus, Check, X, GripVertical, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Archive, RotateCcw, Edit2, Minus, Sun, Hexagon, BookOpen, Flame, Snowflake, Share2, Download, Copy, Inbox, Upload, AlertTriangle, Trash2, Filter, Smartphone, MoreVertical, Home, ArrowLeft, BarChart2 } from 'lucide-react';
 import { encodeCamisetaToPng, generateCamisetaSVG, decodeImageToCamiseta, encodeCamisetaToJSON, decodeJSONToCamiseta } from './codec/index.js';
 import { elegirEco, silenciarEco, citaVigente, paraQueDia, yaEscogio, calcularSeñales, ultimaSesion } from './ecos/index.js';
 import { TEXTOS } from './ecos/textos.js';
@@ -8,6 +8,7 @@ import { construirICS, entregarCita, proximaCita, DURACION, aInputLocal, deInput
 import { mirar, preguntaDelCosturero, PREGUNTAS_DIFICILES } from './observador/index.js';
 import { TEXTOS_OBSERVADOR } from './observador/textos.js';
 import { CATALOGO } from './catalogo.js';
+import { analizar, etiquetaLarga } from './analisis.js';
 
 import {
   STATE_KEY,
@@ -125,6 +126,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [sesion, setSesion] = useState(null);
   const [showRespaldo, setShowRespaldo] = useState(false);
+  const [showDatos, setShowDatos] = useState(false);   // el vistazo al archivo propio
   const [showNota, setShowNota] = useState(false);  // hoja de nota rápida (global)
   // Hoja de cita: { cadencia, origen: 'cierre' | 'eco', eco? }. La abre el
   // final de un check-in o el eco; es la misma hoja en los dos casos.
@@ -570,6 +572,11 @@ export default function App() {
     onVolver={() => setShowRespaldo(false)}
     onRestaurado={() => window.location.reload()} /></Frame>;
 
+  // El vistazo a los datos: misma forma que el respaldo —vista propia, con su
+  // scroll— y también antes de la bienvenida, para que la puerta funcione
+  // desde donde se abra.
+  if (showDatos) return <Frame><DatosView state={state} onVolver={() => setShowDatos(false)} /></Frame>;
+
   // Bienvenida: primera vez sin camisetas y sin haber decidido aún
   if (state.camisetas.length === 0 && !showCreate && !showCatalogo && !showImport) {
     return <Frame><Welcome onCatalogo={() => setShowCatalogo(true)} onCrear={() => setShowCreate(true)} onImport={() => setShowImport(true)} onRespaldo={() => setShowRespaldo(true)} /></Frame>;
@@ -729,7 +736,8 @@ export default function App() {
       {tab === 'camisetas' && <CamisetasView cams={state.camisetas} cerros={state.cerros} movimientos={state.movimientos} onOpen={setOpenCam} onCreate={() => setShowCreate(true)} onOpenCatalogo={() => setShowCatalogo(true)} onImport={() => setShowImport(true)} onReorder={reorderCamiseta} onMover={moverCamiseta} onLavar={lavarLaRopa} onCrearCerro={crearCerro} onRenombrarCerro={renombrarCerro} onBorrarCerro={borrarCerro} onDonarCerro={donarCerro} onDoblar={setDoblarCam} />}
       {tab === 'diario' && <DiarioView state={state} onStart={setSesion}
         onAgendar={(cadencia) => setPedirCita({ cadencia, origen: 'diario' })}
-        onRespaldo={() => setShowRespaldo(true)} />}
+        onRespaldo={() => setShowRespaldo(true)}
+        onDatos={() => setShowDatos(true)} />}
     </main>
     <QuickNoteButton onClick={() => setShowNota(true)} />
     <TabBar tab={tab} setTab={setTab} />
@@ -3042,7 +3050,7 @@ function AddMilestone({ onSave, onCancel }) {
   return <MilestoneForm onSave={onSave} onCancel={onCancel} submitLabel="añadir" />;
 }
 
-function DiarioView({ state, onStart, onAgendar, onRespaldo }) {
+function DiarioView({ state, onStart, onAgendar, onRespaldo, onDatos }) {
   const ult = (tipo) => state.sesiones.filter(s => s.tipo === tipo).slice(-1)[0];
   // La puerta al ritual diario está siempre abierta —nada de "vuelve después
   // de las 6"—; lo único que cambia con la hora es a qué día apunta. Si ya se
@@ -3110,6 +3118,19 @@ function DiarioView({ state, onStart, onAgendar, onRespaldo }) {
       <p className="ff-serif text-sm" style={{ color: 'var(--ink-soft)' }}>
         Todo esto vive solo en este teléfono. Un respaldo toma diez segundos.
       </p>
+    </button>
+    {/* Debajo del respaldo y no en una pestaña propia, a propósito: las dos
+        puertas son lo mismo —mirar el archivo, no jugar— y ninguna de las dos
+        tiene que estar a la mano mientras se juega. */}
+    <button onClick={onDatos} className="flex items-center gap-3 w-full text-left p-4 mt-3 ring-ink"
+      style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)' }}>
+      <BarChart2 size={20} style={{ flex: 'none', color: 'var(--cian)' }} />
+      <div>
+        <h3 className="ff-serif text-xl mb-1">Echarle un vistazo a mis datos</h3>
+        <p className="ff-serif text-sm" style={{ color: 'var(--ink-soft)' }}>
+          Lo que se ve cuando uno mira todo junto: qué has jugado, cuándo y con qué camisetas.
+        </p>
+      </div>
     </button>
   </div>);
 }
@@ -3277,6 +3298,250 @@ function RespaldoView({ state, onVolver, onRestaurado }) {
     {msg && (
       <p className="ff-serif mt-6" style={{ color: msg.kind === 'ok' ? 'var(--moss)' : 'var(--accent)' }}>{msg.text}</p>
     )}
+  </div>);
+}
+
+// ── El vistazo a los datos ───────────────────────────────────────────────
+//
+// El mini-análisis de uso real, que empezó como un artifact suelto hecho a
+// mano sobre un backup de agosto y aquí se calcula en vivo. Las cuentas están
+// en `src/analisis.js`; esto solo dibuja.
+//
+// Por qué es una vista propia y no una pestaña: mirar el archivo es un gesto
+// distinto de jugar. No hay nada que hacer aquí, no hay ningún botón que
+// cambie el estado, y el juego nunca trae al usuario a esta pantalla — se
+// entra a propósito, desde la puerta del respaldo, y se sale con la flecha.
+//
+// Aquí adentro —y SOLO aquí adentro— viven la racha y el porcentaje de días
+// activos. Es una excepción consciente a la regla dura de `docs/brief.md`, y
+// está anotada con su fecha y su razón en `docs/decisiones.md`. La regla
+// sigue mandando en todo lo demás: ningún eco, ningún ritual y ninguna
+// pantalla del juego cuenta días seguidos ni ausencias, y nada de aquí sale
+// a buscar al usuario.
+//
+// Los números no se ven bonitos con la paleta del artifact original (crema
+// claro) porque esa no es la paleta de este app: los colores salen del codec,
+// como todo lo demás. Los tonos son los mismos que la prenda.
+
+// Negrita de juguete: los insights vienen con *lo importante* marcado con
+// asteriscos. Se parte en trozos en vez de meter HTML en un string, porque
+// ahí adentro hay nombres que escribió el usuario.
+function TextoConFuerza({ texto }) {
+  return texto.split('*').map((trozo, i) => (
+    i % 2 ? <b key={i} style={{ color: 'var(--ink)', fontWeight: 600 }}>{trozo}</b> : <span key={i}>{trozo}</span>
+  ));
+}
+
+function Tarjeta({ titulo, desc, children }) {
+  return (<div className="mb-4 p-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)' }}>
+    <h2 className="ff-serif text-base mb-1" style={{ fontWeight: 600 }}>{titulo}</h2>
+    {desc && <p className="ff-mono text-xs mb-4" style={{ color: 'var(--ink-faint)' }}>{desc}</p>}
+    {children}
+  </div>);
+}
+
+// Barras verticales. `destacar` son los índices que muestran su número
+// encima; los demás lo sueltan al tocarlos, para que la fila de cifras no
+// tape la forma de la curva.
+function Columnas({ datos, todasConCifra = false, destacar = [], minAncho = 0 }) {
+  const [tocada, setTocada] = useState(null);
+  const max = Math.max(1, ...datos.map(d => d.n));
+  return (<div style={{ overflowX: 'auto' }}>
+    <div className="flex items-end gap-1 relative" style={{ height: 160, paddingTop: 20, minWidth: minAncho || undefined }}>
+      {/* La base se dibuja al ras de donde nacen las barras. El offset no es
+          mágico: es exactamente el alto de la fila de etiquetas (12 + 6). */}
+      <span style={{ position: 'absolute', left: 0, right: 0, bottom: 18, height: 1, background: 'var(--line)' }} />
+      {datos.map((d, i) => {
+        const mostrar = todasConCifra || tocada === i || destacar.includes(i);
+        const alto = d.n === 0 ? 0 : Math.max((d.n / max) * 100, 3);
+        return (<button key={d.label + i} onClick={() => setTocada(tocada === i ? null : i)}
+          className="flex-1 flex flex-col items-center justify-end ring-ink"
+          style={{ height: '100%', minWidth: 14, background: 'none', border: 'none', padding: 0 }}
+          aria-label={`${d.label}: ${d.n}`}>
+          <span className="ff-mono" style={{ fontSize: 10, height: 13, color: 'var(--ink-soft)' }}>
+            {mostrar ? d.n : ''}
+          </span>
+          <span style={{
+            width: '100%', maxWidth: 22, height: `${alto}%`,
+            background: tocada === i ? 'var(--cian)' : 'var(--violeta-luz)',
+            boxShadow: tocada === i ? '0 0 18px -4px var(--cian)' : 'none',
+          }} />
+          <span className="ff-mono" style={{
+            fontSize: 9, height: 12, lineHeight: '12px', marginTop: 6, whiteSpace: 'nowrap',
+            color: tocada === i ? 'var(--cian)' : 'var(--ink-faint)',
+          }}>{d.label}</span>
+        </button>);
+      })}
+    </div>
+  </div>);
+}
+
+// Barras horizontales. El nombre de la camiseta lo escribió el usuario y
+// puede ser largo: se recorta con puntos suspensivos y no se envuelve, para
+// que todas las filas midan lo mismo y las barras sigan comparables.
+function BarrasH({ datos, sufijo = '' }) {
+  const max = Math.max(1, ...datos.map(d => d.n));
+  return (<div className="flex flex-col gap-2">
+    {datos.map((d, i) => (
+      <div key={d.nombre + i} className="grid items-center gap-2" style={{ gridTemplateColumns: 'minmax(0,7.5rem) 1fr auto' }}>
+        <span className="ff-serif text-right" style={{
+          fontSize: 13, color: 'var(--ink-soft)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{d.nombre}</span>
+        <span style={{ height: 14 }}>
+          <span style={{
+            display: 'block', height: 14,
+            width: `${Math.max((d.n / max) * 100, 2)}%`,
+            background: d.color || 'var(--violeta-luz)',
+          }} />
+        </span>
+        <span className="ff-mono" style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{d.n}{sufijo}</span>
+      </div>
+    ))}
+  </div>);
+}
+
+function DatosView({ state, onVolver }) {
+  // El análisis se calcula una vez por entrada a la vista. No hay nada aquí
+  // que modifique el estado, así que no hay por qué recalcularlo.
+  const a = useMemo(() => analizar(state), [state]);
+
+  const tablas = [
+    ['Por semana', 'Semana', 'Misiones', a.semanal.map(s => [s.label, s.n])],
+    ['Por día de la semana', 'Día', 'Misiones', a.porDiaSemana.map(d => [d.label, d.n])],
+    ['Por tono', 'Tono', 'Misiones', [...a.tonos.map(t => [t.label, t.n]), ['sin tono', a.sinTono]]],
+    ['Camisetas más jugadas', 'Camiseta', 'Misiones', a.topCams.map(c => [c.nombre, c.n])],
+    ['Antes de la despedida', 'Camiseta', 'Días', a.duracion.map(d => [d.nombre, `${d.dias} d`])],
+  ].filter(([, , , filas]) => filas.length);
+
+  const pctSinTono = a.completadas ? Math.round((a.sinTono / a.completadas) * 100) : 0;
+  // La semana más alta y la última llevan su cifra puesta: son las dos que
+  // uno busca sin tener que tocar nada.
+  const picoSemana = a.semanal.reduce((mejor, s, i) => (s.n > a.semanal[mejor].n ? i : mejor), 0);
+
+  return (<div className="px-6 pt-8 pb-32 max-w-2xl mx-auto fade-up">
+    <div className="flex items-center gap-3 mb-8">
+      <button onClick={onVolver} className="ring-ink p-1" style={{ color: 'var(--ink-faint)' }} aria-label="Volver al juego">
+        <ArrowLeft size={20} />
+      </button>
+      <span className="smallcaps" style={{ color: 'var(--ink-faint)' }}>Tus datos</span>
+    </div>
+
+    <h1 className="display text-4xl mb-3">Cómo has jugado de verdad.</h1>
+    <p className="ff-serif mb-8" style={{ color: 'var(--ink-soft)' }}>
+      {etiquetaLarga(a.periodo.desde)} → {etiquetaLarga(a.periodo.hasta)} · {a.periodo.dias} {a.periodo.dias === 1 ? 'día' : 'días'}.
+      Sale de lo que ya está guardado en este teléfono.
+    </p>
+
+    {a.completadas === 0 ? (
+      // Sin nada marcado no hay análisis, y llenar la pantalla de ceros sería
+      // peor que decirlo. Nada de "llevas X días sin": esto describe el
+      // archivo, no al usuario.
+      <p className="ff-serif text-lg" style={{ color: 'var(--ink-soft)' }}>
+        Todavía no hay misiones marcadas, así que no hay nada que mirar. Vuelve cuando el archivo tenga algo adentro.
+      </p>
+    ) : (<>
+
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+      {a.tiles.map(t => (
+        <div key={t.label} className="p-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)' }}>
+          <div className="ff-mono mb-1" style={{ fontSize: 10.5, lineHeight: 1.3, color: 'var(--ink-faint)' }}>{t.label}</div>
+          <div className="ff-serif" style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.01em' }}>
+            {t.value}
+            {t.sub && <span className="ff-mono ml-1" style={{ fontSize: 11, fontWeight: 400, color: 'var(--ink-soft)' }}>{t.sub}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <Tarjeta titulo="Misiones completadas por semana" desc="Cada barra es una semana de lunes a domingo. Toca una para ver el número.">
+      <Columnas datos={a.semanal} destacar={[picoSemana, a.semanal.length - 1]}
+        minAncho={Math.max(0, a.semanal.length * 26)} />
+    </Tarjeta>
+
+    <div className="grid sm:grid-cols-2 gap-4">
+      <Tarjeta titulo="Por día de la semana" desc="Suma de todo el período">
+        <Columnas datos={a.porDiaSemana} todasConCifra />
+      </Tarjeta>
+      <Tarjeta titulo="Tono de las misiones completadas"
+        desc={`${a.sinTono} de ${a.completadas} (${pctSinTono}%) no tienen tono asignado — son hábitos simples, tipo rutina`}>
+        {a.tonos.length ? (<>
+          <div className="flex flex-wrap gap-x-4 gap-y-2 mb-4">
+            {a.tonos.map(t => (
+              <span key={t.id} className="ff-mono flex items-center gap-1.5" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>
+                <span style={{ width: 9, height: 9, background: t.color, flex: 'none' }} />{t.label}
+              </span>
+            ))}
+          </div>
+          <BarrasH datos={a.tonos.map(t => ({ nombre: t.label, n: t.n, color: t.color }))} />
+        </>) : (
+          <p className="ff-serif text-sm" style={{ color: 'var(--ink-faint)' }}>Ninguna de las misiones que has completado tiene tono.</p>
+        )}
+      </Tarjeta>
+    </div>
+
+    {a.topCams.length > 0 && (
+      <Tarjeta titulo="Camisetas más jugadas" desc="Por misiones completadas, estén todavía en el clóset o ya te hayas despedido de ellas">
+        <BarrasH datos={a.topCams} />
+      </Tarjeta>
+    )}
+
+    {a.duracion.length > 0 && (
+      <Tarjeta titulo="Cuánto duraron antes de la despedida" desc="Días entre que la creaste y que la donaste">
+        <BarrasH datos={a.duracion.map(d => ({ nombre: d.nombre, n: d.dias }))} sufijo=" d" />
+      </Tarjeta>
+    )}
+
+    {a.insights.length > 0 && (
+      <Tarjeta titulo="Lo que salta a la vista">
+        <ul className="m-0 p-0" style={{ listStyle: 'none' }}>
+          {a.insights.map((t, i) => (
+            <li key={i} className="ff-serif relative mb-3" style={{ paddingLeft: 18, fontSize: 13.5, lineHeight: 1.55, color: 'var(--ink-soft)' }}>
+              <span className="ff-mono absolute" style={{ left: 0, color: 'var(--cian)' }}>❯</span>
+              <TextoConFuerza texto={t} />
+            </li>
+          ))}
+        </ul>
+      </Tarjeta>
+    )}
+
+    {tablas.length > 0 && (
+      <details className="mb-4">
+        <summary className="ff-mono text-xs ring-ink cursor-pointer" style={{ color: 'var(--ink-faint)' }}>ver todo en tabla</summary>
+        <table className="w-full mt-3" style={{ borderCollapse: 'collapse', fontSize: 12 }}>
+          <tbody>
+            {tablas.map(([titulo, colA, colB, filas]) => (
+              <Fragment key={titulo}>
+                <tr><th colSpan={2} className="ff-serif text-left" style={{ padding: '14px 8px 5px', fontWeight: 600 }}>{titulo}</th></tr>
+                <tr>
+                  <th className="ff-mono text-left" style={{ padding: '5px 8px', fontWeight: 400, color: 'var(--ink-faint)', borderBottom: '1px solid var(--line-soft)' }}>{colA}</th>
+                  <th className="ff-mono text-left" style={{ padding: '5px 8px', fontWeight: 400, color: 'var(--ink-faint)', borderBottom: '1px solid var(--line-soft)' }}>{colB}</th>
+                </tr>
+                {filas.map(([n, v], i) => (
+                  <tr key={i}>
+                    <td className="ff-serif" style={{ padding: '5px 8px', borderBottom: '1px solid var(--line-soft)' }}>{n}</td>
+                    <td className="ff-mono" style={{ padding: '5px 8px', borderBottom: '1px solid var(--line-soft)', fontVariantNumeric: 'tabular-nums' }}>{v}</td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </details>
+    )}
+
+    </>)}
+
+    <div className="hr-deco mt-8 mb-4" />
+    <p className="ff-mono" style={{ fontSize: 11, lineHeight: 1.6, color: 'var(--ink-faint)' }}>
+      Esto se calcula aquí mismo, cada vez que abres la pantalla. No se guarda, no se envía y nadie más lo ve.
+      {a.sesiones.total > 0 && <> Sesiones de cierre: {a.sesiones.total} ({a.sesiones.diaria} diarias, {a.sesiones.semanal} semanales, {a.sesiones.mensual} mensuales).</>}
+      {a.camisetas.creadas > 0 && <> Camisetas: {a.camisetas.creadas} creadas en total, {a.camisetas.activas} en el clóset / {a.camisetas.donadas} donadas.</>}
+    </p>
+
+    <button onClick={onVolver} className="ff-mono text-xs ring-ink mt-8 flex items-center gap-2" style={{ color: 'var(--ink-faint)' }}>
+      <ArrowLeft size={14} /> volver al juego
+    </button>
   </div>);
 }
 

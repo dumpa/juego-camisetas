@@ -20,7 +20,7 @@ Una camiseta es una identidad tuya —Capitán, Padre, Atleta— y ponértela si
 |---|---|---|
 | **Hoy** | el que trabaja | las misiones de lo que llevas puesto, para marcarlas |
 | **Camisetas** | el que ordena | tu clóset entero |
-| **Diario** | el que se mira | los tres rituales, tu historia y el respaldo |
+| **Diario** | el que se mira | los tres rituales, tu historia, el respaldo y el vistazo a tus datos |
 
 Arriba se ven tus puntos y la fecha. El botón flotante de abajo guarda **una nota** —un pensamiento, sin más— que queda en el diario.
 
@@ -126,6 +126,20 @@ El app **no te va a insistir** con esto: recordarte que hace rato no respaldas s
 
 ---
 
+## Echarle un vistazo a tus datos
+
+Justo debajo del respaldo, en *Diario*, hay una segunda puerta: **Echarle un vistazo a mis datos**. Es el archivo de tu juego mirado todo junto — cuántas misiones has completado, en qué semanas, en qué días, con qué tonos, con qué camisetas y cuánto vivieron las que ya donaste. Abajo hay una tabla con todos los números, por si prefieres leerlos que verlos.
+
+Tres cosas que conviene saber:
+
+- **Se calcula en el momento, en tu teléfono.** No se guarda, no se envía y nadie más lo ve. Cerrar la pantalla no deja rastro.
+- **No hay nada que hacer ahí.** Ningún botón cambia nada de tu juego: se entra a mirar y se sale con la flecha de arriba.
+- **El juego nunca te va a traer aquí.** No hay aviso, ni eco, ni recordatorio de venir a ver tus números. Entras si quieres, cuando quieras.
+
+Aquí adentro, y solo aquí, vas a ver una racha de días seguidos y un porcentaje de días activos. Es lo único de todo el app que cuenta eso, y está ahí porque **tú** abriste tu propio archivo para mirarlo. En el juego —los rituales, los ecos, la pantalla de hoy— eso no existe y no va a existir.
+
+---
+
 ## Los ecos
 
 De vez en cuando aparece un mensaje corto arriba. Habla una vez, se va, y puede no decir nada durante días. Descartarlo lo silencia.
@@ -136,7 +150,7 @@ Un eco puede decirte que hace rato no juegas de futbolista —eso habla de una i
 
 ## Lo que el app no hace, y es a propósito
 
-- No cuenta rachas ni días seguidos.
+- No cuenta rachas ni días seguidos — salvo dentro del vistazo a tus datos, que abres tú a propósito.
 - No cuenta ausencias: faltar no produce nada, ni aviso ni marca.
 - No manda notificaciones.
 - No evalúa si cumpliste lo que escogiste.
