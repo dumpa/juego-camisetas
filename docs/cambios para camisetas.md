@@ -1,6 +1,9 @@
 # Algunos comentarios.
 
+## Datos
 
+Puede ser interesante dar la opción de hacer click en cada camiseta y ver algunos datos de la camiseta. Que la vista sea una camiseta a la que le hago click y se despliega alguna información sobre ella.
+Se abre la ventana y lo que veo es la galeria con las camisetas, generadas con el codec, al hacer click se despliegan algunos insights de esa camiseta. 
 
 ## diario
 
